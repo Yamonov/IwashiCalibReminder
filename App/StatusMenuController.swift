@@ -7,14 +7,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private let model: ReminderModel
     private let preferences: ReminderPreferences
     private let notifier: ReminderNotifier
+    private let updater: AppUpdater
     private let menu = NSMenu()
     private let menuBuilder = MonitorMenuBuilder()
     private var statusItem: NSStatusItem?
     private var preferencesWindow: ReminderPreferencesController?
     private var menuIsOpen = false
 
-    init(model: ReminderModel, preferences: ReminderPreferences, notifier: ReminderNotifier) {
+    init(model: ReminderModel, preferences: ReminderPreferences, notifier: ReminderNotifier, updater: AppUpdater) {
         self.model = model; self.preferences = preferences; self.notifier = notifier
+        self.updater = updater
         super.init()
     }
 
@@ -37,46 +39,48 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
     }
 
-    private var message: String? {
-        if model.isDemo { return "デモ表示" }
-        switch model.phase {
-        case .idle, .loading: return "情報を取得中…"
-        case .blocked: return "ColorNavigator 7の画面を閉じてください"
-        case .failed:
-            if model.message?.contains("見つかりません") == true { return "モニターのUSB接続を確認してください" }
-            return "情報を取得できませんでした"
-        case .ready:
-            if model.reports.isEmpty { return "対象モニターがありません" }
-            return ReminderMenuData(reports: model.reports).issue ?? notifier.notice
-        }
+    private var messages: [String] {
+        var result = model.isDemo ? ["デモ表示"] : model.globalMessages
+        if let notice = notifier.notice { result.append(notice) }
+        if let failure = updater.startupFailure { result.append(failure) }
+        return result
     }
 
     private func updateStatusImage() {
-        let data = ReminderMenuData(reports: model.reports)
-        let graph = ReminderGraph(menu: data, thresholdMinutes: preferences.thresholdMinutes)
-        let description = data.rows.first(where: { $0.remainingMinutes != nil })?.remainingText ?? "残り時間は不明"
-        let status = message
-        statusItem?.button?.image = GraphImage.make(graph: graph)
-        statusItem?.button?.toolTip = (["IwashiCalibReminder", description] + [status].compactMap { $0 }).joined(separator: " — ")
-        statusItem?.button?.setAccessibilityLabel("IwashiCalibReminder、\(description)")
+        let graph = ReminderStatusGraph(monitors: model.monitors, thresholdMinutes: preferences.thresholdMinutes)
+        let description = graph.earliest?.remainingMinutes.map(ReminderText.remaining) ?? "残り時間は不明"
+        let issues = model.monitors.compactMap(\.message)
+        let updateNotice = updater.updateAvailable ? ["アップデートがあります"] : []
+        statusItem?.button?.image = GraphImage.make(status: graph, showsUpdateIndicator: updater.updateAvailable)
+        let descriptions = ["IwashiCalibReminder", description] + messages + issues + updateNotice
+        statusItem?.button?.toolTip = descriptions.joined(separator: " — ")
+        statusItem?.button?.setAccessibilityLabel(descriptions.joined(separator: "、"))
     }
 
     // Rebuild presentation from the cached snapshot only. This never calls refresh().
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        if let message {
+        for message in messages {
             let item = ReadableMenuInformation.item(message)
-            item.toolTip = model.message ?? message
+            item.toolTip = model.message?.isEmpty == false ? model.message : message
             menu.addItem(item)
-            separator()
         }
-        let data = ReminderMenuData(reports: model.reports)
+        if !messages.isEmpty { separator() }
+        let data = ReminderMenuData(monitors: model.monitors)
         menuBuilder.appendGroups(to: menu, data: data)
         separator()
         let refresh = action("情報更新", selector: #selector(refreshInformation(_:)))
         refresh.isEnabled = model.phase != .loading
         separator()
         action("環境設定…", selector: #selector(showPreferences(_:)))
+        if updater.updateAvailable {
+            let update = action("アップデートがあります", selector: #selector(checkForUpdates(_:)))
+            update.isEnabled = updater.canCheckForUpdates
+            update.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 13, weight: .regular)
+                    .applying(.init(paletteColors: [.systemBlue])))
+            update.image?.isTemplate = false
+        }
         separator()
         action("終了", selector: #selector(quit(_:)))
     }
@@ -105,11 +109,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     @objc private func refreshInformation(_ sender: Any?) { model.refresh() }
+    @objc private func checkForUpdates(_ sender: Any?) { updater.checkForUpdates() }
     @objc private func quit(_ sender: Any?) { NSApplication.shared.terminate(sender) }
 
     @objc func showPreferences(_ sender: Any?) {
         if preferencesWindow == nil {
-            let controller = ReminderPreferencesController(preferences: preferences, notifier: notifier)
+            let controller = ReminderPreferencesController(preferences: preferences, notifier: notifier, updater: updater)
             controller.onClose = { [weak self] in self?.preferencesWindow = nil }
             preferencesWindow = controller
         }

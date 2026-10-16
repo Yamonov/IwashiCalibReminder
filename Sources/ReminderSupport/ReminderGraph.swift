@@ -45,3 +45,24 @@ public struct ReminderGraph: Equatable, Sendable {
         }
     }
 }
+
+public struct ReminderStatusGraph: Sendable {
+    public struct Segment: Sendable {
+        public let id: String
+        public let graph: ReminderGraph
+        public let isStale: Bool
+    }
+    public let segments: [Segment]
+    public let earliest: ReminderGraph?
+
+    public init(monitors: [MonitorDisplayState], thresholdMinutes: Int64) {
+        segments = monitors.sorted { $0.id < $1.id }.map { monitor in
+            Segment(id: monitor.id, graph: ReminderGraph(remainingMinutes: monitor.graphValue?.remainingMinutes,
+                intervalMinutes: monitor.graphValue?.intervalMinutes, thresholdMinutes: thresholdMinutes),
+                isStale: monitor.isStale)
+        }
+        earliest = segments.map(\.graph).filter { $0.remainingMinutes != nil }.min {
+            ($0.remainingMinutes ?? .max) < ($1.remainingMinutes ?? .max)
+        }
+    }
+}

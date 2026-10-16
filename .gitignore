@@ -6,4 +6,9 @@ build/
 *.xcuserstate
 xcuserdata/
 BuildMetadata/.build-number.lock
-*.xcodeproj/project.xcworkspace/
+IwashiCalibReminder.xcodeproj/project.xcworkspace/*
+!IwashiCalibReminder.xcodeproj/project.xcworkspace/xcshareddata/
+IwashiCalibReminder.xcodeproj/project.xcworkspace/xcshareddata/*
+!IwashiCalibReminder.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+IwashiCalibReminder.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+!IwashiCalibReminder.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved

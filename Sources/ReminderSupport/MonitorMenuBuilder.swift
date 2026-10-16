@@ -22,8 +22,17 @@ public final class MonitorMenuBuilder {
         paragraph.defaultTabInterval = 1
         for group in data.groups {
             menu.addItem(header(group.title, symbol: "display"))
-            if group.rows.isEmpty {
-                let item = ReadableMenuInformation.item("モード情報を取得できません")
+            if let message = group.message {
+                let item = ReadableMenuInformation.item(message)
+                item.indentationLevel = 1
+                item.toolTip = group.detail ?? message
+                menu.addItem(item)
+            }
+            if group.isStale, let date = group.lastSuccessAt {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "ja_JP")
+                formatter.dateFormat = "M/d H:mm"
+                let item = ReadableMenuInformation.item("前回取得：" + formatter.string(from: date))
                 item.indentationLevel = 1
                 menu.addItem(item)
             }
@@ -39,9 +48,10 @@ public final class MonitorMenuBuilder {
                 text.append(NSAttributedString(attachment: attachment))
                 text.append(NSAttributedString(string: "\t" + row.remainingText, attributes: attributes))
                 item.attributedTitle = text
-                item.toolTip = "\(group.report.monitor.model) / S/N \(row.serialNumber) / モード \(row.modeNumber)"
-                if let mode = group.report.calibrationHistory.colorModes.first(where: { $0.modeNumber == row.modeNumber }) {
-                    item.submenu = deferredDetailMenu(report: group.report, mode: mode)
+                item.toolTip = "\(row.monitorName) / S/N \(row.serialNumber) / モード \(row.modeNumber)"
+                if let report = group.report,
+                   let mode = report.calibrationHistory.colorModes.first(where: { $0.modeNumber == row.modeNumber }) {
+                    item.submenu = deferredDetailMenu(report: report, mode: mode)
                 }
                 menu.addItem(item)
             }

@@ -20,7 +20,7 @@ let package = Package(
         .target(name: "EIZOHID", swiftSettings: strictSwift,
                 linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("IOKit")]),
         .executableTarget(name: "EIZOUsageCLI", dependencies: ["EIZOHID"], swiftSettings: strictSwift),
-        .target(name: "ReminderSupport", dependencies: ["EIZOHID"], swiftSettings: strictSwift)
+        .target(name: "ReminderSupport", dependencies: ["EIZOHID"], swiftSettings: strictSwift),
     ],
     swiftLanguageModes: [.v6]
 )

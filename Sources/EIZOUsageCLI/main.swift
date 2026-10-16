@@ -6,6 +6,10 @@ struct ArgumentError: Error, CustomStringConvertible {
     let description: String
 }
 
+var snapshot = false
+var refreshID: String?
+var snapshotRegistrations: [CNRegisteredMonitor]?
+
 func printJSON(_ value: some Encodable) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -53,16 +57,20 @@ do {
         eizo-usage --database-only [--json] [--database-path PATH]
         eizo-usage --check-cn [--json]
 
-        Read cumulative usage time directly from an EIZO CS2731 over USB HID.
-        Default: one reading per attached CS2731, then exit. No monitor settings are changed.
+        Read cumulative usage time from connected EIZO monitors registered in the CN database.
+        Default: one reading per matched monitor, then exit. No monitor settings are changed.
         With usable CN history, print enabled modes' remaining usage time and the earliest deadline (all ties).
         Enable state is read from the monitor, separately from the targets assigned in the CN database.
         If ColorNavigator 7 is in application mode, exit with status 1 before monitor access. Agent-only mode is allowed.
+        Devices are enumerated on each invocation; verified identities/capabilities are cached for the current connection and OS boot.
+        The CN database is required. Unregistered devices receive no usage-time or mode-state queries.
         --json     Emit a JSON array of readings (diagnostics go to stderr).
         --verbose  Log HID requests/responses to stderr.
         --format   Select an advertised format; default is auto (extended first).
         --all-modes  Include disabled/unassigned modes for diagnostics instead of filtering enabled modes.
         --check-cn   Check CN application/Agent state only; no HID access or database read.
+        --snapshot   App protocol: reports plus per-monitor/global failures; writes diagnostics to macOS unified logging.
+        --refresh-id ID  Correlate an app update with its helper log entries (used with --snapshot).
         --database-path  CN LevelDB directory (default: /Library/Application Support/EIZO/ColorNavigator 7/db.0).
         --database-only  Read saved CN histories only, with no monitor access, even while CN is running.
                          Saved monitors may be disconnected. Reads original DB files directly in Swift.
@@ -89,6 +97,13 @@ do {
         case "--database-only": databaseOnly = true
         case "--all-modes": includeAllModes = true
         case "--check-cn": checkCNOnly = true
+        case "--snapshot": snapshot = true
+        case "--refresh-id":
+            index += 1
+            guard index < arguments.count, UUID(uuidString: arguments[index]) != nil else {
+                throw ArgumentError(description: "--refresh-id requires a UUID")
+            }
+            refreshID = arguments[index]
         case "--database-path":
             index += 1
             guard index < arguments.count, !arguments[index].isEmpty, !arguments[index].hasPrefix("--") else {
@@ -132,12 +147,32 @@ do {
         }
         exit(database.status == "unavailable" ? 1 : 0)
     }
-    let readings = try MonitorProbe.read(format: format, verbose: verbose)
+    try MonitorProbe.checkAccess()
+    if snapshot { refreshID = refreshID ?? UUID().uuidString }
+    if let refreshID {
+        DiagnosticLog.shared.record(DiagnosticEvent("database.read_started", fields: ["refreshID": refreshID], level: .debug))
+    }
     let database = CNDatabase.read(path: databasePath)
-    let reports = readings.map {
+    if let refreshID {
+        DiagnosticLog.shared.record(DiagnosticEvent("database.read_finished", fields: [
+            "refreshID": refreshID, "status": database.status, "detail": database.message ?? ""],
+            level: database.status == "available" ? .info : .error))
+    }
+    let registered = try database.registeredMonitors()
+    snapshotRegistrations = registered
+    let probe = try MonitorProbe.readResult(registeredMonitors: registered, format: format, verbose: verbose, refreshID: refreshID)
+    let reports = probe.readings.map {
         MonitorUsageReport(monitor: $0, calibrationHistory: database.history(model: $0.model, serial: $0.serialNumber),
                            includeAllModes: includeAllModes)
     }
+    if snapshot {
+        alarm(0)
+        try printJSON(MonitorRefreshResult(reports: reports, failures: probe.failures,
+            globalFailures: probe.globalFailures, discovery: probe.discovery, registeredMonitors: registered))
+        exit(0)
+    }
+    if let failure = probe.globalFailures.first { throw failure }
+    if let failure = probe.failures.first { throw failure.failure }
     alarm(0)
     if json {
         try printJSON(reports)
@@ -154,6 +189,18 @@ do {
         }
     }
 } catch {
+    if snapshot, !(error is ArgumentError) {
+        alarm(0)
+        let failure = AcquisitionFailure.wrapping(error)
+        DiagnosticLog.shared.record(DiagnosticEvent("helper.acquisition_failed", fields: [
+            "refreshID": refreshID ?? "", "code": failure.kind.rawValue, "detail": failure.detail,
+            "operation": failure.operation ?? "probe", "ioReturn": failure.ioReturn.map(String.init) ?? ""],
+            level: failure.diagnosticLevel))
+        if let data = try? JSONEncoder().encode(MonitorRefreshResult(globalFailures: [failure], registeredMonitors: snapshotRegistrations)) {
+            print(String(decoding: data, as: UTF8.self))
+            exit(0)
+        }
+    }
     FileHandle.standardError.write(Data("eizo-usage: \(error)\n".utf8))
     exit(error is ArgumentError ? 2 : 1)
 }

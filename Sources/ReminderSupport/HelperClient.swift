@@ -34,19 +34,36 @@ public struct HelperClient: Sendable {
     @concurrent
     public func read() async throws -> [MonitorUsageReport] {
         let result = try await HelperCommand(executableURL: executableURL, arguments: ["--json"]).run()
+        try validate(result)
+        do { return try JSONDecoder().decode([MonitorUsageReport].self, from: result.stdout) }
+        catch { throw HelperError.invalidOutput }
+    }
+
+    @concurrent
+    public func readSnapshot(refreshID: String) async throws -> MonitorRefreshResult {
+        let result = try await HelperCommand(executableURL: executableURL,
+            arguments: ["--snapshot", "--json", "--refresh-id", refreshID],
+            diagnostics: .shared, refreshID: refreshID).run()
+        try validate(result)
+        do {
+            let snapshot = try JSONDecoder().decode(MonitorRefreshResult.self, from: result.stdout)
+            guard snapshot.schemaVersion == 1 else { throw HelperError.invalidOutput }
+            return snapshot
+        } catch { throw HelperError.invalidOutput }
+    }
+
+    private func validate(_ result: HelperResult) throws {
         guard result.reason == .exit, result.status == 0 else {
             if result.reason == .uncaughtSignal && result.status == SIGALRM { throw HelperError.timedOut }
             let detail = String(decoding: result.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            if detail.contains("not found. Check the monitor's USB") {
-                throw HelperError.failed("CS2731が見つかりません。モニターのUSB接続を確認してください。")
+            if detail.contains("No connected monitor matches the ColorNavigator database") {
+                throw HelperError.failed("登録済みのモニターが見つかりません。USB接続を確認してください。")
             }
             if detail.contains("ColorNavigator 7 is in application mode") {
                 throw HelperError.failed("ColorNavigator 7の画面が開いているため、取得を中止しました。Agentは起動したままで構いません。")
             }
             throw HelperError.failed(detail.isEmpty ? "モニターの読み取りに失敗しました。" : detail)
         }
-        do { return try JSONDecoder().decode([MonitorUsageReport].self, from: result.stdout) }
-        catch { throw HelperError.invalidOutput }
     }
 }
 
@@ -66,13 +83,18 @@ final class HelperCommand: Sendable {
     }
     private let state: OSAllocatedUnfairLock<State>
     private let timeout: TimeInterval
+    private let diagnostics: DiagnosticLog?
+    private let refreshID: String?
 
-    init(executableURL: URL, arguments: [String], timeout: TimeInterval = 20) {
+    init(executableURL: URL, arguments: [String], timeout: TimeInterval = 20,
+         diagnostics: DiagnosticLog? = nil, refreshID: String? = nil) {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
         state = OSAllocatedUnfairLock(initialState: State(process: process))
         self.timeout = timeout
+        self.diagnostics = diagnostics
+        self.refreshID = refreshID
     }
 
     func run() async throws -> HelperResult {
@@ -95,6 +117,7 @@ final class HelperCommand: Sendable {
     }
 
     private func execute() throws -> HelperResult {
+        let started = ProcessInfo.processInfo.systemUptime
         let stdout = Pipe()
         let stderr = Pipe()
         let exitSignal = DispatchSemaphore(value: 0)
@@ -123,6 +146,16 @@ final class HelperCommand: Sendable {
         let outputData = output.finish()
         let errorData = errors.finish()
         return try state.withLock { state in
+            let unsuccessful = timedOut || state.process.terminationStatus != 0
+                || state.process.terminationReason != .exit || outputData == nil || errorData == nil
+            let level: DiagnosticEvent.Level = state.cancelled ? .debug : unsuccessful ? .error : .info
+            diagnostics?.record(DiagnosticEvent("helper.finished", fields: [
+                "refreshID": refreshID ?? "", "exitStatus": String(state.process.terminationStatus),
+                "terminationReason": state.process.terminationReason == .exit ? "exit" : "signal",
+                "timedOut": String(timedOut), "cancelled": String(state.cancelled),
+                "elapsedMilliseconds": String((ProcessInfo.processInfo.systemUptime - started) * 1000),
+                "stdoutBytes": outputData.map { String($0.count) } ?? "overLimitOrReadFailure",
+                "stderr": errorData.map { String(decoding: $0.prefix(4_096), as: UTF8.self) } ?? "overLimitOrReadFailure"], level: level))
             if state.cancelled { throw CancellationError() }
             if timedOut { throw HelperError.timedOut }
             guard let outputData, let errorData else { throw HelperError.outputTooLarge }

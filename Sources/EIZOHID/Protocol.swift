@@ -2,7 +2,12 @@ import Foundation
 
 struct ProbeError: Error, CustomStringConvertible {
     let description: String
-    init(_ message: String) { description = message }
+    let failure: AcquisitionFailure
+    init(_ message: String, kind: AcquisitionFailure.Kind = .invalidResponse,
+         operation: String? = nil, ioReturn: Int32? = nil) {
+        description = message
+        failure = AcquisitionFailure(kind, detail: message, operation: operation, ioReturn: ioReturn)
+    }
 }
 
 func littleEndian(_ bytes: ArraySlice<UInt8>) -> UInt32 {
@@ -39,7 +44,7 @@ struct FeatureDescriptor {
         while cursor < bytes.count {
             let prefix = bytes[cursor]
             cursor += 1
-            guard prefix != 0xFE else { throw ProbeError("Unsupported HID long item") }
+            guard prefix != 0xFE else { throw ProbeError("Unsupported HID long item", kind: .unsupported) }
             let size = [0, 1, 2, 4][Int(prefix & 3)]
             guard cursor + size <= bytes.count else { throw ProbeError("Truncated HID descriptor") }
             let value = littleEndian(bytes[cursor..<(cursor + size)])
@@ -97,7 +102,7 @@ struct FeatureDescriptor {
     func report(_ usage: UInt32) throws -> (id: UInt8, length: Int) {
         guard let field = try field(usage), field.reportID != 0,
               reportBits[field.reportID] == field.bits else {
-            throw ProbeError(String(format: "Unsupported HID report layout for 0x%08X", usage))
+            throw ProbeError(String(format: "Unsupported HID report layout for 0x%08X", usage), kind: .unsupported)
         }
         return (field.reportID, 1 + field.bits / 8)
     }
@@ -109,17 +114,21 @@ enum UsageFormat: String {
     var byteCount: Int { self == .extended ? 5 : 3 }
 
     static func select(from descriptor: FeatureDescriptor, requested: String) throws -> UsageFormat {
+        try select(requested: requested) { try descriptor.field($0.usage)?.bits }
+    }
+
+    static func select(requested: String, bitCount: (UsageFormat) throws -> Int?) throws -> UsageFormat {
         let candidates: [UsageFormat] = requested == "auto" ? [.extended, .legacy] :
             UsageFormat(rawValue: requested).map { [$0] } ?? []
         for format in candidates {
-            if let field = try descriptor.field(format.usage) {
-                guard field.bits == format.byteCount * 8 else {
-                    throw ProbeError("Unexpected usage-time payload size: \(field.bits) bits")
+            if let bits = try bitCount(format) {
+                guard bits == format.byteCount * 8 else {
+                    throw ProbeError("Unexpected usage-time payload size: \(bits) bits")
                 }
                 return format
             }
         }
-        throw ProbeError("Requested usage-time format is not advertised by the monitor")
+        throw ProbeError("Requested usage-time format is not advertised by the monitor", kind: .unsupported)
     }
 }
 

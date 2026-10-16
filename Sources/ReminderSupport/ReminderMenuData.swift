@@ -26,7 +26,11 @@ public struct ReminderMenuRow: Sendable, Identifiable {
 public struct ReminderMonitorGroup: Sendable, Identifiable {
     public let id: String
     public let title: String
-    public let report: MonitorUsageReport
+    public let report: MonitorUsageReport?
+    public let message: String?
+    public let detail: String?
+    public let lastSuccessAt: Date?
+    public let isStale: Bool
     public let rows: [ReminderMenuRow]
 }
 
@@ -38,7 +42,12 @@ public struct ReminderMenuData: Sendable {
     public let groups: [ReminderMonitorGroup]
 
     public init(reports: [MonitorUsageReport]) {
-        monitorIDs = reports.map { $0.monitor.serialNumber + ":" + $0.monitor.locationID }.sorted()
+        self.init(monitors: reports.map(MonitorDisplayState.current))
+    }
+
+    public init(monitors: [MonitorDisplayState]) {
+        let reports = monitors.compactMap(\.report)
+        monitorIDs = monitors.map(\.id).sorted()
         rows = reports.flatMap { report -> [ReminderMenuRow] in
             let history = report.calibrationHistory
             let interval = history.managementPolicy?.intervalHours.flatMap { hours -> Int64? in
@@ -50,7 +59,7 @@ public struct ReminderMenuData: Sendable {
                 let name = mode.modeName ?? (mode.modeType == "Standard" ? mode.targetName : nil)
                 let badge = mode.modeType == "Standard" ? "STD" : mode.modeType == "Calibration" ? "ADV" : "—"
                 return ReminderMenuRow(
-                    monitorID: report.monitor.serialNumber + ":" + report.monitor.locationID,
+                    monitorID: report.monitor.identity.id,
                     monitorName: report.monitor.model.replacingOccurrences(of: "ColorEdge ", with: ""),
                     serialNumber: report.monitor.serialNumber, modeNumber: mode.modeNumber,
                     modeName: name ?? "モード \(mode.modeNumber)", badge: badge,
@@ -68,19 +77,21 @@ public struct ReminderMenuData: Sendable {
                 return lhs.modeNumber < rhs.modeNumber
             }
         }
-        let issues = reports.compactMap(Self.shortIssue)
+        let issues = monitors.compactMap(\.message)
         let unique = issues.reduce(into: [String]()) { result, issue in
             if !result.contains(issue) { result.append(issue) }
         }
         issue = unique.isEmpty ? nil : unique.joined(separator: "／")
         let sortedRows = rows
         let identities = monitorIDs
-        groups = reports.map { report in
-            let id = report.monitor.serialNumber + ":" + report.monitor.locationID
-            let name = report.monitor.model.replacingOccurrences(of: "ColorEdge ", with: "")
+        groups = monitors.map { state in
+            let id = state.id
+            let name = state.identity.model?.replacingOccurrences(of: "ColorEdge ", with: "") ?? "モニター"
             let number = (identities.firstIndex(of: id) ?? 0) + 1
             return ReminderMonitorGroup(id: id, title: identities.count > 1 ? "\(name)・\(number)" : name,
-                                        report: report, rows: sortedRows.filter { $0.monitorID == id })
+                report: state.report, message: state.message, detail: state.detail,
+                lastSuccessAt: state.lastSuccessAt, isStale: state.isStale,
+                rows: sortedRows.filter { $0.monitorID == id })
         }.sorted { lhs, rhs in
             switch (lhs.rows.first?.remainingMinutes, rhs.rows.first?.remainingMinutes) {
             case let (a?, b?) where a != b: return a < b
@@ -96,20 +107,4 @@ public struct ReminderMenuData: Sendable {
         return "\(row.monitorName)・\(index + 1)"
     }
 
-    private static func shortIssue(_ report: MonitorUsageReport) -> String? {
-        switch report.calibrationHistory.status {
-        case "available": break
-        case "databaseNotFound": return "ColorNavigatorのDBがありません"
-        case "monitorNotFound": return "モニターの調整記録がありません"
-        case "modeSelectionUnavailable": return "有効モードを取得できません"
-        default: return "調整記録を読み取れません"
-        }
-        switch report.calibrationCountdown.status {
-        case "available": return nil
-        case "partiallyAvailable": return "一部の残り時間が不明です"
-        case "disabled": return "調整スケジュールが無効です"
-        case "unsupportedSchedule": return "使用時間による調整間隔を設定してください"
-        default: return "残り時間を計算できません"
-        }
-    }
 }

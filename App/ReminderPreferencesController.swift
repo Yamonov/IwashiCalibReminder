@@ -9,15 +9,19 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
     var onClose: (() -> Void)?
     private let preferences: ReminderPreferences
     private let notifier: ReminderNotifier
+    private let updater: AppUpdater
     private let threshold = NSTextField(string: "")
     private let unit = NSPopUpButton(frame: .zero, pullsDown: false)
     private let message = NSTextField(wrappingLabelWithString: "")
+    private let automaticChecks = NSButton(checkboxWithTitle: "アップデートを自動的に確認", target: nil, action: nil)
+    private let checkUpdates = NSButton(title: "アップデートを確認…", target: nil, action: nil)
     private var validationMessage: String?
 
-    init(preferences: ReminderPreferences, notifier: ReminderNotifier) {
+    init(preferences: ReminderPreferences, notifier: ReminderNotifier, updater: AppUpdater) {
         self.preferences = preferences
         self.notifier = notifier
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 370, height: 110),
+        self.updater = updater
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 370, height: 210),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init(window: window)
         window.title = "環境設定 — IwashiCalibReminder"
@@ -26,7 +30,7 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
         configureControls()
         window.contentView = makeContentView()
         window.center()
-        observeNotice()
+        observeChanges()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -45,6 +49,11 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
         unit.setAccessibilityLabel("単位")
         message.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         message.textColor = .secondaryLabelColor
+        automaticChecks.target = self
+        automaticChecks.action = #selector(automaticChecksChanged(_:))
+        checkUpdates.target = self
+        checkUpdates.action = #selector(checkForUpdates(_:))
+        checkUpdates.bezelStyle = .rounded
     }
 
     private func makeContentView() -> NSView {
@@ -59,8 +68,10 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
         grid.yPlacement = .center
         grid.rowSpacing = 16
         grid.columnSpacing = 12
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 370, height: 110))
-        for view in [grid, message] {
+        let separator = NSBox()
+        separator.boxType = .separator
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 370, height: 210))
+        for view in [grid, separator, automaticChecks, checkUpdates, message] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -70,23 +81,40 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
             grid.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
             threshold.widthAnchor.constraint(equalToConstant: 76),
             unit.widthAnchor.constraint(equalToConstant: 68),
-            message.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 14),
+            separator.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 14),
+            separator.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            automaticChecks.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 14),
+            automaticChecks.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
+            checkUpdates.topAnchor.constraint(equalTo: automaticChecks.bottomAnchor, constant: 10),
+            checkUpdates.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
+            message.topAnchor.constraint(equalTo: checkUpdates.bottomAnchor, constant: 12),
             message.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
             message.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20)
         ])
         return content
     }
 
-    private func observeNotice() {
+    private func observeChanges() {
         withObservationTracking {
             _ = notifier.notice
+            _ = updater.startupFailure
+            automaticChecks.state = updater.automaticallyChecksForUpdates ? .on : .off
+            automaticChecks.isEnabled = updater.isAvailable
+            checkUpdates.isEnabled = updater.canCheckForUpdates
+            updateMessage()
         } onChange: { [weak self] in
-            Task { @MainActor in self?.observeNotice() }
+            Task { @MainActor in self?.observeChanges() }
         }
-        updateMessage()
     }
 
-    private func updateMessage() { message.stringValue = validationMessage ?? notifier.notice ?? "" }
+    private func updateMessage() { message.stringValue = validationMessage ?? updater.startupFailure ?? notifier.notice ?? "" }
+
+    @objc private func automaticChecksChanged(_ sender: NSButton) {
+        updater.setAutomaticallyChecksForUpdates(sender.state == .on)
+    }
+
+    @objc private func checkForUpdates(_ sender: NSButton) { updater.checkForUpdates() }
 
     func controlTextDidChange(_ notification: Notification) { saveThreshold() }
     @objc private func unitChanged(_ sender: NSPopUpButton) { saveThreshold() }

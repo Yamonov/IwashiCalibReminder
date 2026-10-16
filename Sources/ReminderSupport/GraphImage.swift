@@ -17,7 +17,47 @@ public enum GraphImage {
         return image
     }
 
-    private static func drawFill(_ graph: ReminderGraph) {
+    public static func make(status: ReminderStatusGraph, showsUpdateIndicator: Bool = false) -> NSImage {
+        let image = NSImage(size: size, flipped: false) { _ in
+            let count = status.segments.count
+            if count > 0 {
+                let width = inside.width / Double(count)
+                for (index, segment) in status.segments.enumerated() {
+                    // The column order matches the stable monitor numbers in the menu.
+                    let leftGap: Double = index == 0 ? 0 : min(0.5, width / 8)
+                    let rightGap: Double = index == count - 1 ? 0 : min(0.5, width / 8)
+                    let column = NSRect(x: inside.minX + Double(index) * width + leftGap,
+                                        y: inside.minY, width: width - leftGap - rightGap, height: inside.height)
+                    drawFill(segment.graph, rect: column, opacity: segment.isStale ? 0.35 : 1)
+                    NSGraphicsContext.saveGraphicsState()
+                    let left = index == 0 ? 0 : inside.minX + Double(index) * width
+                    let right = index == count - 1 ? size.width : inside.minX + Double(index + 1) * width
+                    NSGraphicsContext.current?.cgContext.clip(to: NSRect(x: left, y: 0, width: right - left, height: size.height))
+                    NSGraphicsContext.current?.cgContext.setAlpha(segment.isStale ? 0.35 : 1)
+                    drawFrame()
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+            } else { drawFrame() }
+            if let label = status.earliest?.label { drawLabel(label) }
+            if showsUpdateIndicator { drawUpdateIndicator() }
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
+    private static func drawUpdateIndicator() {
+        // Same proportions and colors as Scripta and ACEMenu.
+        let diameter = floor(min(size.width, size.height) * 0.5)
+        let rect = NSRect(x: size.width - diameter, y: 0, width: diameter, height: diameter)
+        NSColor.white.withAlphaComponent(0.96).setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        let inset = max(1.2, diameter * 0.18)
+        NSColor.systemBlue.setFill()
+        NSBezierPath(ovalIn: rect.insetBy(dx: inset, dy: inset)).fill()
+    }
+
+    private static func drawFill(_ graph: ReminderGraph, rect: NSRect = inside, opacity: Double = 1) {
         guard let fraction = graph.fraction, fraction > 0 else { return }
         let color: NSColor
         switch graph.level {
@@ -29,8 +69,9 @@ public enum GraphImage {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSBezierPath(roundedRect: inside, xRadius: 2, yRadius: 2).addClip()
+        NSGraphicsContext.current?.cgContext.setAlpha(opacity)
         color.setFill()
-        NSRect(x: inside.minX, y: inside.minY, width: inside.width, height: inside.height * fraction).fill()
+        NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height * fraction).fill()
     }
 
     private static func drawFrame() {

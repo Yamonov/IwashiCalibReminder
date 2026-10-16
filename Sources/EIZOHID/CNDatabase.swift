@@ -1,5 +1,25 @@
 import Foundation
 
+public struct CNRegisteredMonitor: Codable, Hashable, Sendable {
+    public let model: String
+    public let serialNumber: String
+
+    public init(model: String, serialNumber: String) {
+        self.model = model
+        self.serialNumber = serialNumber
+    }
+
+    public var id: String { model + ":" + serialNumber }
+
+    var isValid: Bool {
+        [model, serialNumber].allSatisfy { value in
+            !value.isEmpty && value.utf8.count <= 64
+                && value == value.trimmingCharacters(in: .whitespacesAndNewlines)
+                && value.utf8.allSatisfy { (0x20...0x7E).contains($0) }
+        }
+    }
+}
+
 public struct CNStoredMonitor: Encodable {
     public let model: String
     public let serialNumber: String
@@ -26,6 +46,27 @@ public struct CNDatabaseContents: Encodable {
             return CNCalibrationHistory(sourcePath: sourcePath, status: status, message: message)
         }
         return CNHistoryDecoder.history(model: model, serial: serial, sourcePath: sourcePath, records: records)
+    }
+
+    /// A lightweight catalogue, independent of calibration history and saved LUTs.
+    /// Every update reads the current CN catalogue; an old discovery cache cannot authorize a removed monitor.
+    public func registeredMonitors() throws -> [CNRegisteredMonitor] {
+        guard status == "available" else {
+            throw AcquisitionFailure(.databaseUnavailable, detail: message ?? status, operation: "readDatabase")
+        }
+        struct Record: Decodable { let product: String; let serial: String }
+        do {
+            return try records.filter { $0.key.hasPrefix("MonitorInformation:") }.sorted { $0.key < $1.key }.map { key, data in
+                let record = try JSONDecoder().decode(Record.self, from: data)
+                let monitor = CNRegisteredMonitor(model: record.product, serialNumber: record.serial)
+                guard monitor.isValid, key == "MonitorInformation:" + record.product + "_" + record.serial else {
+                    throw ProbeError("CN monitor registration identity is invalid")
+                }
+                return monitor
+            }
+        } catch {
+            throw AcquisitionFailure(.databaseUnavailable, detail: String(describing: error), operation: "readRegistrations")
+        }
     }
 
     /// These are saved CN records, not an enumeration of currently connected monitors.
