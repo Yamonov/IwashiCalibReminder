@@ -42,7 +42,7 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandar
             try controller.updater.start()
             started = true
         } catch {
-            startupFailure = "アップデート機能を開始できませんでした"
+            startupFailure = String(localized: "Unable to start the updater")
             logger.error("Updater startup failed: \(error.localizedDescription, privacy: .public)")
         }
         synchronizeSettings()

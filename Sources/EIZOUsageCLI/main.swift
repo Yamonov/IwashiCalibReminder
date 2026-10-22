@@ -10,9 +10,9 @@ var snapshot = false
 var refreshID: String?
 var snapshotRegistrations: [CNRegisteredMonitor]?
 
-func printJSON(_ value: some Encodable) throws {
+func printJSON(_ value: some Encodable, compact: Bool = true) throws {
     let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.outputFormatting = compact ? [.withoutEscapingSlashes] : [.prettyPrinted, .sortedKeys]
     print(String(decoding: try encoder.encode(value), as: UTF8.self))
 }
 
@@ -43,6 +43,10 @@ func printHistory(_ history: CNCalibrationHistory, countdown: CNCalibrationCount
                 if let minutes = value.remainingMinutes {
                     print("    Calibration deadline: \(CalibrationCountdownText.remaining(minutes))")
                 } else { print("    Calibration deadline: unavailable (\(value.message ?? value.status))") }
+                if let date = value.nextCalibrationDate { print("    Scheduled calibration: \(date)") }
+                if let date = value.predictedCalibrationDate {
+                    print("    Predicted calibration: \(date) (average use since calibration)")
+                }
             } else { print("    Calibration deadline: unavailable (\(countdown.message ?? countdown.status))") }
         }
         if let message = mode.message { print("    \(message)") }
@@ -53,29 +57,31 @@ do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     if arguments.contains("--help") || arguments.contains("-h") {
         print("""
-        eizo-usage [--json] [--verbose] [--all-modes] [--format auto|extended|legacy] [--database-path PATH]
-        eizo-usage --database-only [--json] [--database-path PATH]
+        eizo-usage [--json [--full-details]] [--verbose] [--all-modes] [--format auto|extended|legacy] [--database-path PATH]
+        eizo-usage --database-only [--json] [--full-details] [--database-path PATH]
         eizo-usage --check-cn [--json]
 
         Read cumulative usage time from connected EIZO monitors registered in the CN database.
         Default: one reading per matched monitor, then exit. No monitor settings are changed.
-        With usable CN history, print enabled modes' remaining usage time and the earliest deadline (all ties).
+        With usable CN history, print enabled modes' remaining time and the earliest deadline (all ties).
+        Calendar schedules use their fixed deadline; usage forecasts use average activity since calibration.
         Enable state is read from the monitor, separately from the targets assigned in the CN database.
         If ColorNavigator 7 is in application mode, exit with status 1 before monitor access. Agent-only mode is allowed.
         Devices are enumerated on each invocation; verified identities/capabilities are cached for the current connection and OS boot.
         The CN database is required. Unregistered devices receive no usage-time or mode-state queries.
-        --json     Emit a JSON array of readings (diagnostics go to stderr).
+        --json     Emit compact JSON with the fields used by the current app (diagnostics go to stderr).
+        --full-details  Include complete saved records, LUTs and ICC bytes for diagnostics (requires --json).
         --verbose  Log HID requests/responses to stderr.
         --format   Select an advertised format; default is auto (extended first).
         --all-modes  Include disabled/unassigned modes for diagnostics instead of filtering enabled modes.
         --check-cn   Check CN application/Agent state only; no HID access or database read.
-        --snapshot   App protocol: reports plus per-monitor/global failures; writes diagnostics to macOS unified logging.
+        --snapshot   App protocol: compact reports plus per-monitor/global failures; writes diagnostics to macOS unified logging.
         --refresh-id ID  Correlate an app update with its helper log entries (used with --snapshot).
         --database-path  CN LevelDB directory (default: /Library/Application Support/EIZO/ColorNavigator 7/db.0).
         --database-only  Read saved CN histories only, with no monitor access, even while CN is running.
                          Saved monitors may be disconnected. Reads original DB files directly in Swift.
                          No LevelDB/Snappy installation or temporary database copy is required.
-                         Remaining time cannot be calculated without current monitor usage.
+                         Does not calculate live countdowns or forecasts; current monitor state is not read.
                          Lists all saved modes because enable state is not stored in the CN database.
         Exit status: 0 success, 1 read error, 2 invalid arguments.
         A 15-second process alarm bounds a stuck synchronous HID operation.
@@ -83,6 +89,7 @@ do {
         exit(0)
     }
     var json = false
+    var fullDetails = false
     var verbose = false
     var format = "auto"
     var databasePath = CNDatabase.defaultPath
@@ -93,6 +100,7 @@ do {
     while index < arguments.count {
         switch arguments[index] {
         case "--json": json = true
+        case "--full-details": fullDetails = true
         case "--verbose": verbose = true
         case "--database-only": databaseOnly = true
         case "--all-modes": includeAllModes = true
@@ -120,6 +128,12 @@ do {
         }
         index += 1
     }
+    guard !fullDetails || (json && !snapshot) else {
+        throw ArgumentError(description: "--full-details requires --json and cannot be used with --snapshot")
+    }
+    guard !(databaseOnly && snapshot) && !(checkCNOnly && (databaseOnly || snapshot)) else {
+        throw ArgumentError(description: "--database-only, --check-cn and --snapshot are mutually exclusive")
+    }
     if checkCNOnly {
         let access = ColorNavigatorAccess.check()
         if json { try printJSON(access) }
@@ -130,10 +144,11 @@ do {
         exit(access.allowsMonitorAccess ? 0 : 1)
     }
     alarm(15)
+    let details: CNHistoryDetail = fullDetails ? .full : snapshot || json ? .menu : .summary
     if databaseOnly {
-        let database = CNDatabase.read(path: databasePath)
+        let database = CNDatabase.read(path: databasePath, details: details)
         alarm(0)
-        if json { try printJSON(database) }
+        if json { try printJSON(database, compact: !fullDetails) }
         else {
             print("Saved CN monitor records (no HID communication; monitors may be disconnected)")
             print("Remaining usage time: unavailable (current monitor usage was not read)")
@@ -145,14 +160,14 @@ do {
                 printHistory(monitor.calibrationHistory)
             }
         }
-        exit(database.status == "unavailable" ? 1 : 0)
+        exit(database.status == "available" ? 0 : 1)
     }
     try MonitorProbe.checkAccess()
     if snapshot { refreshID = refreshID ?? UUID().uuidString }
     if let refreshID {
         DiagnosticLog.shared.record(DiagnosticEvent("database.read_started", fields: ["refreshID": refreshID], level: .debug))
     }
-    let database = CNDatabase.read(path: databasePath)
+    let database = CNDatabase.read(path: databasePath, details: details)
     if let refreshID {
         DiagnosticLog.shared.record(DiagnosticEvent("database.read_finished", fields: [
             "refreshID": refreshID, "status": database.status, "detail": database.message ?? ""],
@@ -168,14 +183,14 @@ do {
     if snapshot {
         alarm(0)
         try printJSON(MonitorRefreshResult(reports: reports, failures: probe.failures,
-            globalFailures: probe.globalFailures, discovery: probe.discovery, registeredMonitors: registered))
+            globalFailures: probe.globalFailures, discovery: probe.discovery, registeredMonitors: registered), compact: true)
         exit(0)
     }
     if let failure = probe.globalFailures.first { throw failure }
     if let failure = probe.failures.first { throw failure.failure }
     alarm(0)
     if json {
-        try printJSON(reports)
+        try printJSON(reports, compact: !fullDetails)
     } else {
         for report in reports {
             let reading = report.monitor

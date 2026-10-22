@@ -1,75 +1,113 @@
 import AppKit
 import EIZOHID
 
-/// Builds only from an immutable reading. No device, database, or notification work
-/// is performed when either the root menu or a detail submenu is opened.
+public enum ICCProfileAction: Equatable, Sendable { case copyPath, showInFinder }
+
+/// Presentation only: opening a menu never queries the monitor or CN database.
 @MainActor
 public final class MonitorMenuBuilder {
-    private var savedDataMenus = SavedDataMenuBuilder()
     private var detailSources: [DeferredMenuSource] = []
-    public init() {}
+    private var profileTargets: [ProfileMenuTarget] = []
+    private var modeItems: [NSMenuItem] = []
+    private let profileAction: @MainActor (ICCProfileAction, URL) -> Void
+
+    public init(profileAction: (@MainActor (ICCProfileAction, URL) -> Void)? = nil) {
+        self.profileAction = profileAction ?? { action, url in
+            switch action {
+            case .copyPath:
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.path, forType: .string)
+            case .showInFinder:
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
+    }
+
+    public func appendMessages(_ messages: [String], to menu: NSMenu, detail: String? = nil) {
+        guard !messages.isEmpty else { return }
+        let item = CompactMenuViews.message(messages.joined(separator: "\n"))
+        item.toolTip = detail?.isEmpty == false ? detail : messages.joined(separator: "\n")
+        menu.addItem(item)
+    }
 
     public func appendGroups(to menu: NSMenu, data: ReminderMenuData) {
-        savedDataMenus = SavedDataMenuBuilder()
         detailSources = []
+        profileTargets = []
+        modeItems = []
         menu.minimumWidth = 0
-        let font = NSFont.menuFont(ofSize: 13)
-        let modeWidth = data.rows.map { ($0.modeName as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-        let timeWidth = data.rows.map { ($0.remainingText as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [NSTextTab(textAlignment: .left, location: ceil(modeWidth) + 14),
-                              NSTextTab(textAlignment: .right, location: ceil(modeWidth) + 14 + 30 + 14 + ceil(timeWidth) + 4)]
-        paragraph.defaultTabInterval = 1
-        for group in data.groups {
-            menu.addItem(header(group.title, symbol: "display"))
+        for (index, group) in data.groups.enumerated() {
+            if index > 0 { menu.addItem(.separator()) }
+            menu.addItem(CompactMenuViews.monitorCard(title: group.title,
+                usage: group.information.map { ModeMenuPresentation.approximateHours($0.usageMinutes) },
+                schedule: group.information == nil ? nil : scheduleDescription(group), dimmed: group.isShowingPrevious))
+            let showsHistory = (group.isShowingPrevious && group.lastSuccessAt != nil)
+                || (group.isStale && group.rows.isEmpty && group.lastSuccessAt == nil)
             if let message = group.message {
-                let item = ReadableMenuInformation.item(message)
-                item.indentationLevel = 1
+                let item = CompactMenuViews.message(message, maximumLines: showsHistory ? 2 : 3)
                 item.toolTip = group.detail ?? message
                 menu.addItem(item)
             }
-            if group.isStale, let date = group.lastSuccessAt {
-                let formatter = DateFormatter()
-                formatter.locale = Locale(identifier: "ja_JP")
-                formatter.dateFormat = "M/d H:mm"
-                let item = ReadableMenuInformation.item("前回取得：" + formatter.string(from: date))
-                item.indentationLevel = 1
-                menu.addItem(item)
+            if group.isShowingPrevious, let date = group.lastSuccessAt {
+                menu.addItem(ReadableMenuInformation.item(L10n.text("Last successful read: %@ (previous data)", ModeMenuPresentation.dateText(date))))
+            } else if group.isStale, group.rows.isEmpty, group.lastSuccessAt == nil {
+                menu.addItem(ReadableMenuInformation.item(L10n.text("No previous reading")))
             }
-            for row in group.rows {
-                let title = "\(row.modeName) [\(row.badge)] \(row.remainingText)"
-                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-                item.indentationLevel = 1
-                let attributes: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
-                let text = NSMutableAttributedString(string: row.modeName + "\t", attributes: attributes)
-                let attachment = NSTextAttachment()
-                attachment.image = badge(row.badge)
-                attachment.bounds = NSRect(x: 0, y: -2, width: 30, height: 13)
-                text.append(NSAttributedString(attachment: attachment))
-                text.append(NSAttributedString(string: "\t" + row.remainingText, attributes: attributes))
-                item.attributedTitle = text
-                item.toolTip = "\(row.monitorName) / S/N \(row.serialNumber) / モード \(row.modeNumber)"
-                if let report = group.report,
-                   let mode = report.calibrationHistory.colorModes.first(where: { $0.modeNumber == row.modeNumber }) {
-                    item.submenu = deferredDetailMenu(report: report, mode: mode)
+            if let information = group.information {
+                let common = NSMenuItem(title: L10n.text("Common settings"), action: nil, keyEquivalent: "")
+                common.submenu = deferredMenu { menu in
+                    let settings = information.commonSettings
+                    let entries: [(String, Bool?)] = [
+                        (L10n.text("Check monitor resolution at startup"), settings?.checkResolution),
+                        (L10n.text("Do not apply ICC profiles"), settings?.appliesICCProfile.map { !$0 }),
+                        (L10n.text("Monitor display and input signal settings"), settings?.checkSignalInfoWarning),
+                        (L10n.text("Monitor video card gamma and keep it linear"), settings?.checkVideoCardGammaChangeToMakeItLinear)
+                    ]
+                    for (label, value) in entries {
+                        menu.addItem(CompactMenuViews.checkmark(label, isOn: value, dimmed: group.isShowingPrevious))
+                    }
                 }
+                menu.addItem(common)
+            }
+            if !group.rows.isEmpty { menu.addItem(.separator()) }
+            for row in group.rows {
+                let item = NSMenuItem(title: "[\(row.badge)]" + row.modeName, action: nil, keyEquivalent: "")
+                item.representedObject = row.id
+                item.setAccessibilityLabel("[\(row.badge)]" + row.modeName + (row.remainingMinutes == nil ? "" : " " + row.remainingText))
+                item.isEnabled = !group.isShowingPrevious
+                if !group.isShowingPrevious, let report = group.report,
+                   let mode = report.calibrationHistory.colorModes.first(where: { $0.modeNumber == row.modeNumber }) {
+                    item.submenu = deferredMenu { [weak self] menu in
+                        self?.populate(menu, with: ModeMenuPresentation(report: report, mode: mode))
+                    }
+                }
+                item.view = CompactMenuViews.modeRow(row, dimmed: group.isShowingPrevious, showsSubmenu: item.hasSubmenu)
+                modeItems.append(item)
                 menu.addItem(item)
             }
         }
     }
 
-    /// Call after menu tracking ends. The reading belongs to the model; none of
-    /// the menu views or expanded JSON branches need to survive between visits.
+    public func highlight(_ item: NSMenuItem?) {
+        modeItems.forEach { CompactMenuViews.highlight($0, selected: $0 === item) }
+    }
+
+    private func scheduleDescription(_ group: ReminderMonitorGroup) -> String {
+        guard let policy = group.information?.policy else { return L10n.text("Calibration interval is unknown") }
+        if policy.type == "None" { return L10n.text("No scheduled calibration") }
+        if policy.scheduleType == "EveryUsageTime", let hours = policy.intervalHours {
+            return L10n.text("Calibrate every %ld h", hours)
+        }
+        if let next = group.rows.compactMap({ $0.nextCalibrationDate.flatMap(CNDate.iso) }).min() {
+            return L10n.text("Calibrate on %@", ModeMenuPresentation.dateText(next))
+        }
+        return L10n.text("Next calibration date is unknown")
+    }
+
     public func clear(_ menu: NSMenu) {
         menu.removeAllItems()
         detailSources = []
-        savedDataMenus = SavedDataMenuBuilder()
-    }
-
-    private func deferredDetailMenu(report: MonitorUsageReport, mode: CNColorModeHistory) -> NSMenu {
-        deferredMenu { [weak self] menu in
-            self?.populate(menu, with: ModeDetailPresentation(report: report, mode: mode))
-        }
+        profileTargets = []
+        modeItems = []
     }
 
     private func deferredMenu(populate: @escaping (NSMenu) -> Void) -> NSMenu {
@@ -78,53 +116,58 @@ public final class MonitorMenuBuilder {
         let source = DeferredMenuSource(populate: populate)
         detailSources.append(source)
         menu.delegate = source
-        menu.addItem(ReadableMenuInformation.item("取得済みの詳細を表示"))
+        menu.addItem(ReadableMenuInformation.item(L10n.text("Show acquired information")))
         return menu
     }
 
-    private func populate(_ menu: NSMenu, with detail: ModeDetailPresentation) {
-        for section in detail.sections {
-            if section.inline {
-                if !menu.items.isEmpty { menu.addItem(.separator()) }
-                menu.addItem(header(section.title, symbol: nil))
-                section.entries.forEach { menu.addItem(ReadableMenuInformation.item($0.title)) }
-            } else {
-                let item = NSMenuItem(title: section.title, action: nil, keyEquivalent: "")
-                item.submenu = deferredMenu { submenu in
-                    section.entries.forEach { submenu.addItem(ReadableMenuInformation.item($0.title)) }
-                }
-                menu.addItem(item)
-            }
+    private func populate(_ menu: NSMenu, with detail: ModeMenuPresentation) {
+        menu.addItem(CompactMenuViews.card(detail))
+        menu.addItem(.separator())
+        let detailColumn = CompactMenuViews.valueColumn(detail.entries)
+        for entry in detail.entries {
+            if entry.label == L10n.text("Gamut"), !detail.gamutCoordinates.isEmpty {
+                menu.addItem(CompactMenuViews.gamut(detail.gamutCoordinates, column: detailColumn))
+            } else { menu.addItem(CompactMenuViews.value(entry, column: detailColumn)) }
         }
-        if !detail.rawRecords.isEmpty {
-            menu.addItem(.separator())
-            let raw = NSMenuItem(title: "保存データの全項目", action: nil, keyEquivalent: "")
-            raw.submenu = savedDataMenus.menu(entries: detail.rawRecords)
-            menu.addItem(raw)
+        menu.addItem(.separator())
+        let profile = NSMenuItem(title: L10n.text("ICC profile"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let url = detail.profilePath.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : nil }
+        for (label, action) in [(L10n.text("Copy path"), ICCProfileAction.copyPath), (L10n.text("Show in Finder"), .showInFinder)] {
+            let item = NSMenuItem(title: label, action: #selector(ProfileMenuTarget.runProfileAction(_:)), keyEquivalent: "")
+            if let url {
+                let target = ProfileMenuTarget(action: action, url: url, handler: profileAction)
+                profileTargets.append(target)
+                item.target = target
+                item.toolTip = url.path
+            } else { item.isEnabled = false }
+            submenu.addItem(item)
+        }
+        profile.submenu = submenu
+        menu.addItem(profile)
+        if let url {
+            menu.addItem(ReadableMenuInformation.item(url.lastPathComponent, secondary: true, maximumWidth: 520))
+        }
+        if detail.usesSpecifiedProfile {
+            menu.addItem(ReadableMenuInformation.item(L10n.text("Use the specified ICC profile")))
+        } else {
+            let profileColumn = CompactMenuViews.valueColumn(detail.profileEntries)
+            detail.profileEntries.forEach { menu.addItem(CompactMenuViews.value($0, column: profileColumn)) }
         }
     }
 
-    private func header(_ title: String, symbol: String?) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        item.view = MonitorSectionHeaderView(title: title, symbol: symbol)
-        return item
-    }
+}
 
-    private func badge(_ title: String) -> NSImage {
-        NSImage(size: NSSize(width: 30, height: 13), flipped: false) { rect in
-            NSColor.secondaryLabelColor.setStroke()
-            let border = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 2, yRadius: 2)
-            border.lineWidth = 1
-            border.stroke()
-            let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 8, weight: .medium),
-                                                           .foregroundColor: NSColor.labelColor]
-            let size = (title as NSString).size(withAttributes: attributes)
-            (title as NSString).draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2),
-                                     withAttributes: attributes)
-            return true
-        }
+@MainActor
+private final class ProfileMenuTarget: NSObject {
+    let action: ICCProfileAction
+    let url: URL
+    let handler: @MainActor (ICCProfileAction, URL) -> Void
+    init(action: ICCProfileAction, url: URL, handler: @escaping @MainActor (ICCProfileAction, URL) -> Void) {
+        self.action = action; self.url = url; self.handler = handler
     }
+    @objc func runProfileAction(_ sender: Any?) { handler(action, url) }
 }
 
 @MainActor

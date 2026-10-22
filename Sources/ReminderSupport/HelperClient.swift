@@ -9,10 +9,10 @@ public enum HelperError: Error, LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .missingExecutable: "読み取りプログラムが見つかりません。アプリをビルドし直してください。"
-        case .timedOut: "モニターの応答が制限時間内に得られませんでした。"
-        case .invalidOutput: "モニターの読み取り結果を解釈できませんでした。"
-        case .outputTooLarge: "読み取り結果がサイズの上限を超えました。"
+        case .missingExecutable: L10n.text("The reader is missing. Rebuild the app.")
+        case .timedOut: L10n.text("The monitor did not respond within the time limit.")
+        case .invalidOutput: L10n.text("Unable to interpret the reader output.")
+        case .outputTooLarge: L10n.text("The reader output exceeds the size limit.")
         case .failed(let message): message
         }
     }
@@ -57,12 +57,12 @@ public struct HelperClient: Sendable {
             if result.reason == .uncaughtSignal && result.status == SIGALRM { throw HelperError.timedOut }
             let detail = String(decoding: result.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             if detail.contains("No connected monitor matches the ColorNavigator database") {
-                throw HelperError.failed("登録済みのモニターが見つかりません。USB接続を確認してください。")
+                throw HelperError.failed(L10n.text("No registered monitor was found. Check the USB connection."))
             }
             if detail.contains("ColorNavigator 7 is in application mode") {
-                throw HelperError.failed("ColorNavigator 7の画面が開いているため、取得を中止しました。Agentは起動したままで構いません。")
+                throw HelperError.failed(L10n.text("Reading stopped because a ColorNavigator 7 window is open. The Agent may remain running."))
             }
-            throw HelperError.failed(detail.isEmpty ? "モニターの読み取りに失敗しました。" : detail)
+            throw HelperError.failed(detail.isEmpty ? L10n.text("Unable to read the monitor.") : detail)
         }
     }
 }
@@ -91,6 +91,7 @@ final class HelperCommand: Sendable {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        process.qualityOfService = .utility
         state = OSAllocatedUnfairLock(initialState: State(process: process))
         self.timeout = timeout
         self.diagnostics = diagnostics

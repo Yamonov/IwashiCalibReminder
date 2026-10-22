@@ -31,7 +31,7 @@ extension CNCalibrationHistory {
             return CNCalibrationHistory(sourcePath: sourcePath, status: "modeSelectionUnavailable",
                                         message: availability?.message ?? "Monitor mode-enable state was not obtained for all saved modes",
                                         databaseVersion: databaseVersion, modeScope: "enabledModes", managementPolicy: managementPolicy,
-                                        monitorDetails: monitorDetails)
+                                        monitorDetails: monitorDetails, commonSettings: commonSettings)
         }
         let enabled = Set(availability.enabledModeNumbers)
         result.colorModes = colorModes.filter { enabled.contains($0.modeNumber) }

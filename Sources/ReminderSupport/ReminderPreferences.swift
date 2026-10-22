@@ -3,7 +3,7 @@ import Observation
 
 public enum ReminderUnit: String, CaseIterable, Sendable {
     case hours, days
-    public var title: String { self == .hours ? "時間" : "日" }
+    public var title: String { self == .hours ? L10n.text("hours") : L10n.text("days") }
     public var minutes: Double { self == .hours ? 60 : 24 * 60 }
 }
 
@@ -52,7 +52,9 @@ public enum ReminderNotificationRules {
 
     public static func pending(menu: ReminderMenuData, thresholdMinutes: Int64,
                                deliveredKeys: Set<String>) -> [ReminderMenuRow] {
-        menu.rows.filter {
+        let previousMonitors = Set(menu.groups.filter(\.isShowingPrevious).map(\.id))
+        return menu.rows.filter {
+            guard !previousMonitors.contains($0.monitorID) else { return false }
             guard let remaining = $0.remainingMinutes, remaining <= thresholdMinutes,
                   let key = key(for: $0) else { return false }
             return !deliveredKeys.contains(key)

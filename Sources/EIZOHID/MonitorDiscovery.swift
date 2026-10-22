@@ -4,7 +4,7 @@ enum MonitorDiscovery {
     /// Called once for an explicit update. No polling, retries, or persistent HID handles.
     static func read(devices: [any MonitorDevice], registered: [CNRegisteredMonitor],
                      cache: inout MonitorDiscoveryCache, format: String = "auto", verbose: Bool = false,
-                     refreshID: String? = nil, accessCheck: () -> ColorNavigatorAccessCheck = ColorNavigatorAccess.check) -> MonitorProbeResult {
+                     refreshID: String? = nil, accessCheck: @escaping () -> ColorNavigatorAccessCheck = ColorNavigatorAccess.check) -> MonitorProbeResult {
         var result = MonitorProbeResult()
         result.discovery.enumeratedDevices = devices.count
         result.discovery.registeredMonitors = registered.count
@@ -29,14 +29,10 @@ enum MonitorDiscovery {
             }
             do {
                 let layout = try MonitorControlLayout(device.connection.primaryDescriptor)
-                let session = MonitorReader(device: device, layout: layout, verbose: verbose, refreshID: refreshID)
+                let session = MonitorReader(device: device, layout: layout, verbose: verbose, refreshID: refreshID, accessCheck: accessCheck)
                 reader = session
                 session.monitor = cached?.monitor
-                let access = accessCheck()
-                guard access.allowsMonitorAccess else {
-                    throw AcquisitionFailure(access.state == "interfaceRunning" ? .cnInUse : .cnStateUnknown,
-                                             detail: access.message, operation: "checkCN")
-                }
+                if let denial = accessCheck().denial { throw denial }
                 // Opening only this device keeps a failure on one monitor local to it.
                 try device.open()
                 defer { device.close() }

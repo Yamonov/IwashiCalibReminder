@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public struct CNCalibrationHistory: Codable, Sendable {
@@ -8,13 +9,56 @@ public struct CNCalibrationHistory: Codable, Sendable {
     public var modeScope: String?
     public var managementPolicy: CNManagementPolicy?
     public var monitorDetails: CNJSONValue?
+    public var commonSettings: CNCommonSettings?
     public var colorModes: [CNColorModeHistory] = []
 }
 
-public struct CNManagementPolicy: Codable, Sendable {
+public struct CNManagementPolicy: Codable, Equatable, Sendable {
     public let type: String?
     public let scheduleType: String?
     public let intervalHours: Int?
+    public var calendarSchedule: CNCalibrationSchedule? = nil
+}
+
+/// Small comparison value captured before filtering by the monitor's enabled modes.
+/// It deliberately excludes measurements, LUTs and other raw database records.
+public struct CNCalibrationConfiguration: Codable, Equatable, Sendable {
+    private let policy: CNManagementPolicy?
+    private let modes: [Mode]
+
+    private struct Mode: Codable, Equatable, Sendable {
+        let number: Int
+        let targetID: String?
+        let targetName: String?
+        let targetSettingsDigest: String?
+        let name: String?
+        let type: String?
+        let status: String
+        let calibrationID: String?
+        let calibratedAt: String?
+        let usageHours: UInt32?
+        let usageMinutes: UInt8?
+    }
+
+    init?(history: CNCalibrationHistory) {
+        guard history.status == "available" else { return nil }
+        policy = history.managementPolicy
+        modes = history.colorModes.map {
+            Mode(number: $0.modeNumber, targetID: $0.targetID, targetName: $0.targetName,
+                 targetSettingsDigest: $0.targetConfigurationDigest ?? Self.digest($0.targetDetails),
+                 name: $0.modeName, type: $0.modeType, status: $0.status,
+                 calibrationID: $0.lastCalibration?.resultID, calibratedAt: $0.lastCalibration?.executedDate,
+                 usageHours: $0.lastCalibration?.usageHours, usageMinutes: $0.lastCalibration?.usageMinutes)
+        }.sorted { $0.number < $1.number }
+    }
+
+    private static func digest(_ value: CNJSONValue?) -> String? {
+        guard let value else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let bytes = try? encoder.encode(value) else { return nil }
+        return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 public struct CNColorModeHistory: Codable, Sendable {
@@ -27,7 +71,11 @@ public struct CNColorModeHistory: Codable, Sendable {
     public var status: String
     public var message: String?
     public var lastCalibration: CNCalibrationRecord?
-    public var targetDetails: CNJSONValue?
+    public var targetDetails: CNJSONValue? {
+        didSet { targetConfigurationDigest = nil }
+    }
+    /// Fingerprint of the full source record, including fields omitted from compact UI data.
+    public var targetConfigurationDigest: String? = nil
 }
 
 public struct CNCalibrationRecord: Codable, Sendable {
@@ -55,6 +103,15 @@ enum CNHistoryDecoder {
         struct Schedule: Decodable {
             let type: String?
             let intervalHour: Int?
+            var calendar: CNCalibrationSchedule?
+
+            init(from decoder: any Decoder) throws {
+                enum Keys: String, CodingKey { case type, intervalHour }
+                let values = try decoder.container(keyedBy: Keys.self)
+                type = try values.decodeIfPresent(String.self, forKey: .type)
+                intervalHour = try values.decodeIfPresent(Int.self, forKey: .intervalHour)
+                calendar = try? CNCalibrationSchedule(from: decoder)
+            }
         }
     }
     private struct Target: Decodable {
@@ -98,7 +155,7 @@ enum CNHistoryDecoder {
     }
 
     static func history(model: String, serial: String, sourcePath: String,
-                        records: [String: Data]) -> CNCalibrationHistory {
+                        records: [String: Data], details: CNHistoryDetail = .menu) -> CNCalibrationHistory {
         let monitorID = model + "_" + serial
         guard let data = records["MonitorInformation:" + monitorID] else {
             return CNCalibrationHistory(sourcePath: sourcePath, status: "monitorNotFound")
@@ -110,15 +167,17 @@ enum CNHistoryDecoder {
                 throw ProbeError("CN monitor record identity does not match the connected monitor")
             }
             var history = CNCalibrationHistory(sourcePath: sourcePath, status: "available")
-            history.monitorDetails = try? decoder.decode(CNJSONValue.self, from: data)
+            if details == .full { history.monitorDetails = try? decoder.decode(CNJSONValue.self, from: data) }
             history.databaseVersion = monitor.dbDataVersion
             if let policy = monitor.managementPolicy {
                 let interval = policy.schedule?.intervalHour
                 history.managementPolicy = CNManagementPolicy(
                     type: policy.type, scheduleType: policy.schedule?.type,
-                    intervalHours: interval.flatMap { $0 > 0 ? $0 : nil }
+                    intervalHours: interval.flatMap { $0 > 0 ? $0 : nil },
+                    calendarSchedule: policy.schedule?.calendar
                 )
             }
+            var calibrations: [String: Swift.Result<CNCalibrationRecord?, any Error>] = [:]
             history.colorModes = monitor.applyingTargets.enumerated().map { index, targetID in
                 var mode = CNColorModeHistory(modeNumber: index + 1, targetID: targetID, status: "unassigned")
                 guard let targetID else { return mode }
@@ -132,7 +191,14 @@ enum CNHistoryDecoder {
                     mode.targetName = target.name
                     mode.modeName = target.modeName
                     mode.modeType = target.targetSetting?.modeType
-                    mode.targetDetails = try? decoder.decode(CNJSONValue.self, from: targetData)
+                    switch details {
+                    case .full: mode.targetDetails = try? decoder.decode(CNJSONValue.self, from: targetData)
+                    case .menu: mode.targetDetails = try? decoder.decode(CNMenuTargetDetails.self, from: targetData).value
+                    case .summary: break
+                    }
+                    if details != .summary {
+                        mode.targetConfigurationDigest = SHA256.hash(data: targetData).map { String(format: "%02x", $0) }.joined()
+                    }
                     let collection: String
                     switch mode.modeType {
                     case "Standard":
@@ -145,7 +211,11 @@ enum CNHistoryDecoder {
                         mode.status = "unsupportedModeType"
                         return mode
                     }
-                    mode.lastCalibration = try latestCalibration(collection: collection, records: records)
+                    let calibration = calibrations[collection] ?? Swift.Result {
+                        try latestCalibration(collection: collection, records: records, details: details)
+                    }
+                    calibrations[collection] = calibration
+                    mode.lastCalibration = try calibration.get()
                     if let result = mode.lastCalibration {
                         mode.status = result.executedDate != nil && result.usageHours != nil && result.usageMinutes != nil
                             ? "available" : "incompleteCalibration"
@@ -162,7 +232,8 @@ enum CNHistoryDecoder {
         }
     }
 
-    private static func latestCalibration(collection: String, records: [String: Data]) throws -> CNCalibrationRecord? {
+    private static func latestCalibration(collection: String, records: [String: Data],
+                                          details: CNHistoryDetail) throws -> CNCalibrationRecord? {
         guard let indexData = records[collection + "_id_"] else { return nil }
         let decoder = JSONDecoder()
         let resultIDs = try decoder.decode([String].self, from: indexData)
@@ -186,9 +257,15 @@ enum CNHistoryDecoder {
             if let minutes = usage?.usageMinutes, minutes >= 60 {
                 throw ProbeError("Invalid calibration usage minutes: \(minutes)")
             }
+            let savedDetails: CNJSONValue?
+            switch details {
+            case .full: savedDetails = try? decoder.decode(CNJSONValue.self, from: data)
+            case .menu: savedDetails = try? decoder.decode(CNMenuResultDetails.self, from: data).value
+            case .summary: savedDetails = nil
+            }
             return CNCalibrationRecord(resultID: resultID, executedDate: date,
                                        usageHours: usage?.usageHours, usageMinutes: usage?.usageMinutes,
-                                       details: try? decoder.decode(CNJSONValue.self, from: data))
+                                       details: savedDetails)
         }
         return nil
     }

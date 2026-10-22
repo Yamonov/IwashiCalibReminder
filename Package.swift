@@ -10,6 +10,7 @@ let strictSwift: [SwiftSetting] = [
 
 let package = Package(
     name: "EIZODisplayHID",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "EIZOHID", targets: ["EIZOHID"]),
@@ -20,7 +21,8 @@ let package = Package(
         .target(name: "EIZOHID", swiftSettings: strictSwift,
                 linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("IOKit")]),
         .executableTarget(name: "EIZOUsageCLI", dependencies: ["EIZOHID"], swiftSettings: strictSwift),
-        .target(name: "ReminderSupport", dependencies: ["EIZOHID"], swiftSettings: strictSwift),
+        .target(name: "ReminderSupport", dependencies: ["EIZOHID"],
+                resources: [.process("Resources")], swiftSettings: strictSwift),
     ],
     swiftLanguageModes: [.v6]
 )

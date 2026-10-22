@@ -43,12 +43,11 @@ enum LevelDBLog {
                 guard fragmented == nil else { throw LevelDBReadError.invalid("duplicate first log fragment") }
                 fragmented = payload
             case 3, 4:
-                guard var accumulated = fragmented, accumulated.count <= maximumRecordSize - payload.count else {
+                guard let count = fragmented?.count, count <= maximumRecordSize - payload.count else {
                     throw LevelDBReadError.invalid("missing first fragment or oversized log record")
                 }
-                accumulated.append(contentsOf: payload)
-                if type == 4 { result.append(accumulated); fragmented = nil }
-                else { fragmented = accumulated }
+                fragmented?.append(contentsOf: payload)
+                if type == 4, let completed = fragmented { result.append(completed); fragmented = nil }
             default: break // Type has been checked above.
             }
         }

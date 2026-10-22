@@ -31,21 +31,26 @@ public struct CNDatabaseContents: Encodable {
     public let status: String
     public let message: String?
     private let records: [String: Data]
+    private let details: CNHistoryDetail
 
     enum CodingKeys: String, CodingKey { case sourcePath, status, message, monitors }
 
-    init(sourcePath: String, status: String, message: String? = nil, records: [String: Data] = [:]) {
+    init(sourcePath: String, status: String, message: String? = nil, records: [String: Data] = [:],
+         details: CNHistoryDetail = .menu) {
         self.sourcePath = sourcePath
         self.status = status
         self.message = message
         self.records = records
+        self.details = details
     }
 
     public func history(model: String, serial: String) -> CNCalibrationHistory {
         guard status == "available" else {
             return CNCalibrationHistory(sourcePath: sourcePath, status: status, message: message)
         }
-        return CNHistoryDecoder.history(model: model, serial: serial, sourcePath: sourcePath, records: records)
+        var history = CNHistoryDecoder.history(model: model, serial: serial, sourcePath: sourcePath, records: records, details: details)
+        if let data = records["Preference:preference"] { history.commonSettings = try? CNCommonSettings(data: data) }
+        return history
     }
 
     /// A lightweight catalogue, independent of calibration history and saved LUTs.
@@ -95,7 +100,7 @@ public enum CNDatabase {
     public static let defaultPath = "/Library/Application Support/EIZO/ColorNavigator 7/db.0"
 
     /// Reads original files through Foundation only. No temporary DB, LevelDB library, or CLI.
-    public static func read(path: String = defaultPath) -> CNDatabaseContents {
+    public static func read(path: String = defaultPath, details: CNHistoryDetail = .menu) -> CNDatabaseContents {
         let source = URL(fileURLWithPath: path).standardizedFileURL
         do {
             do {
@@ -107,11 +112,12 @@ public enum CNDatabase {
             var records: [String: Data] = [:]
             let prefixes = ["MonitorInformation:", "Target_", "CalibrationResult_", "StandardModeCalibrationResult_"]
             for (keyData, value) in values {
-                if let key = String(data: keyData, encoding: .utf8), prefixes.contains(where: key.hasPrefix) {
+                if let key = String(data: keyData, encoding: .utf8),
+                   key == "Preference:preference" || prefixes.contains(where: key.hasPrefix) {
                     records[key] = value
                 }
             }
-            return CNDatabaseContents(sourcePath: source.path, status: "available", records: records)
+            return CNDatabaseContents(sourcePath: source.path, status: "available", records: records, details: details)
         } catch {
             return CNDatabaseContents(sourcePath: source.path, status: "unavailable", message: String(describing: error))
         }

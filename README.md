@@ -2,60 +2,58 @@
 
 <img src="App/Assets.xcassets/AppIcon.appiconset/icon-iOS-Default-1024@1x.png" width="96" height="96" alt="IwashiCalibReminder icon">
 
-EIZO ColorEdgeの次回キャリブレーションまでの残り使用時間を表示する、macOSのメニューバーアプリです。現在のバージョンは **0.9** です。
+EIZO ColorEdgeの次回キャリブレーションまでの残り時間を表示する、macOSのメニューバーアプリです。バージョン **1.0**。英語・日本語に対応します。
+
+A macOS menu bar app that shows the time remaining until the next calibration of a registered EIZO ColorEdge monitor. English and Japanese are supported.
 
 ## ダウンロード
 
-[Releases](https://github.com/Yamonov/IwashiCalibReminder/releases)からZIPをダウンロードし、展開した `IwashiCalibReminder.app` を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
+[1.0のリリース](https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.0)からZIPをダウンロードし、展開した`IwashiCalibReminder.app`を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
 
-## 対応環境と動作
+## 対応環境と表示
 
 - macOS Sonoma 14以降。Apple Silicon / IntelのUniversalバイナリ。
-- 対象モニター: ColorNavigatorのDBに登録済みのEIZO ColorEdge CS/CGシリーズ。モニターとのUSB接続が必要です。実機確認はCS2731で行っています。通信形式が異なる機種は未対応として表示します。
-- 残り時間の計算には、ColorNavigator 7に保存された調整記録と、使用時間による調整間隔が必要です。
-- メニューバーの正方形グラフは、最短の残り使用時間に応じて緑・黄・赤へ変わります。100時間未満では整数時間、期限超過では「NG」を表示します。
-- メニューはモニターごとにグループ化し、有効なモードの調整目標、前回の測定結果、使用時間、日時などを確認できます。複数台のグラフは左右に分割し、取得に失敗した場合は前回のグラフを薄く表示します。
-- 更新は起動時・1時間ごと・手動操作。通知時間は時間または日で指定します。1日はモニター使用時間の24時間です。
-- ColorNavigatorの通常画面が開いている間は、モニターへ問い合わせません。メニューバーのAgentだけの場合は取得できます。
-- CNのデータベースはSwiftで直接読み取り、モニター設定や元のDBは変更しません。
+- 対象はColorNavigatorのDBに登録されたEIZO ColorEdge CS/CGシリーズ。モニターとのUSB接続が必要です。実機確認はCS2731で行っています。通信形式が異なる機種は未対応として表示します。
+- 使用時間方式と日付方式に対応します。使用時間方式は、現在の累積値と前回調整時の累積値の差から計算します。予想日時には調整後の平均稼働率を使います。
+- 日付方式は、前回調整後の最初の予定を期限に固定し、超過しても先送りしません。Daily、Weekly、Monthly、Quarterly、SemiAnnual、Annualを扱います。SelfCorrectionと定期検証は対象外です。
+- メニューバーのグラフは最短の残り時間に応じて緑・黄・赤へ変わります。100時間未満は整数時間、超過時はNGを表示します。複数モニターは左右に分けて表示します。
+- メニューにはモニター情報のカード、有効モードの設定と測定値、ICCファイル名、パスのコピー・Finder表示を用意しています。
+- 取得失敗時は、再利用できる前回情報を薄く表示し、最終取得成功日時を添えます。設定変更や使用時間の逆行を確認した場合は古い値を使いません。
+- 残り時間が指定した日数・時間以下になると通知します。1日は24時間として換算し、同じ調整記録への通知は繰り返しません。
 
-残り時間は、調整間隔から調整後のモニター使用時間を引いた値です。カレンダー上の経過時間ではありません。グラフの黄色は「（調整間隔 − 通知設定時間）÷3」以下、赤は通知設定時間以下で、赤を優先します。
+## 通信と更新
 
-## アップデート
+取得は起動時、1時間ごと、手動更新、スリープ復帰後に行います。メニューを開くだけでは問い合わせず、失敗直後の自動再試行も行いません。ColorNavigatorの通常画面が開いている場合は取得を見送ります。Agentのみの場合は取得できますが、Agentとの完全な排他制御を保証する方式ではありません。
 
-環境設定の「アップデートを確認…」から手動確認できます。「アップデートを自動的に確認」は初期値オンで、Sparkleが1日ごとに確認します。更新がある場合は、メニューの「環境設定…」の下とアイコン右下の青丸で知らせます。更新項目を選ぶとインストール画面を開きます。自動確認でダイアログを開いたり、更新を自動インストールしたりすることはありません。
+CNのDBはSwiftで読み取り、モニター設定や元のDBは変更しません。情報不足を推測で補完せず、取得用CLIは必要なときだけ起動します。
 
-配信先は[appcast](https://yamonov.github.io/IwashiCalibReminder/appcast.xml)です。更新ZIPとappcastにはEdDSA署名を付けています。Sparkle導入前の版からは、今回の配布アプリへ手動で置き換えてください。
+環境設定の「アップデートを確認」から手動確認できます。自動確認は初期値オンで、Sparkleが1日ごとに確認します。更新を検出するとメニューとメニューバーの青丸で知らせます。自動確認で更新ダイアログを開いたり、自動ダウンロード・自動インストールを行ったりしません。
 
-残り時間は`CNCalibration`と使用時間周期の記録から計算します。セルフキャリブレーションやカレンダー指定の周期は、この計算には対応していません。
+配信先は[署名付きappcast](https://yamonov.github.io/IwashiCalibReminder/appcast.xml)です。更新ZIPにもEdDSA署名を付けています。Sparkle導入前の版は、配布アプリへ手動で置き換えてください。
 
 ## ビルド
 
-動作確認済みの開発環境はXcode 27と[公式Swift 6.4.1ツールチェーン](https://www.swift.org/install/macos/)です。XcodeプロジェクトはツールチェーンID `org.swift.641202610071a` を選択します。Swift 6言語モード、完全な並行性チェック、コンパイラ警告のエラー化を有効にしています。
+Xcode 27と公式Swift 6.4.1ツールチェーンで確認しています。プロジェクトは`org.swift.641202610071a`を選択し、Swift 6言語モード・完全な並行性チェック・警告のエラー化を使用します。
 
-`IwashiCalibReminder.xcodeproj` を開き、`IwashiCalibReminder` スキームでビルドしてください。コマンドラインからは次のように実行できます。
+`IwashiCalibReminder.xcodeproj`を開き、`IwashiCalibReminder`スキームでビルドしてください。アプリのビルドごとに`BuildMetadata/BuildNumber.xcconfig`の番号が増えます。
 
-```sh
-xcodebuild -project IwashiCalibReminder.xcodeproj \
-  -scheme IwashiCalibReminder -configuration Release \
-  -derivedDataPath build/DerivedData build
-```
+公開プロジェクトはローカル実行用のアドホック署名を使用します。配布にはXcodeのArchiveをDeveloper IDで書き出し、同梱CLIとSparkleの補助プログラムも含めて署名・公証を確認してください。
 
-生成先は `build/DerivedData/Build/Products/Release/IwashiCalibReminder.app` です。アプリをビルドするたびに `BuildMetadata/BuildNumber.xcconfig` のビルド番号が増加します。
+更新機能は公式Sparkle 2.10.0を使用します。最低OSはアプリ本体・CLIが14.0、Sparkle内部バイナリは公式の12.0です。Sparkleのライセンスをアプリにも同梱しています。LevelDBライブラリやHomebrewは不要です。
 
-公開プロジェクトの署名はローカル実行用のアドホック署名です。Developer ID署名や公証に必要な認証情報は、配布する開発者が別途設定してください。アプリの更新機能に公式のSparkle 2.10.0を使用します。XcodeがSwift Packageを取得します。最低OSはアプリ本体・CLIが14.0、Sparkle内部バイナリは公式パッケージの12.0です。LevelDBライブラリやHomebrewは不要です。Sparkleのライセンスはアプリにも同梱しています。
+自分で更新配信する場合は、`Config/AppInfo.plist`の配信URLと公開鍵を変更し、秘密鍵をリポジトリに含めないでください。
 
-更新・配布時にはSparkle公式の最新安定版を確認し、Xcodeの最低依存バージョンと`Package.resolved`を更新します。自分で更新配信する場合は`Config/AppInfo.plist`の配信URLと公開鍵を自分のものに変更し、秘密鍵は公開リポジトリに含めないでください。
+## ローカライズ
 
-配布用のDeveloper ID署名は、Xcodeの `Product > Archive` から `Distribute App > Developer ID` で書き出します。この書き出しによってSparkleの内部ヘルパーにも配布署名が付きます。書き出したアプリをApple公証し、公証チケットを添付してからZIP・appcastを作成してください。
+アプリの表示文言は`Sources/ReminderSupport/Resources/Localizable.xcstrings`で管理しています。macOSのアプリ言語設定に従い、変更は再起動後に適用されます。`python3 Scripts/check-localizations.py`で翻訳と参照キーを確認できます。
 
 ## CLI
-
-モニター情報を取得するCLIも共通ソースからビルドできます。
 
 ```sh
 TOOLCHAINS=org.swift.641202610071a swift build -c release --product eizo-usage
 .build/release/eizo-usage --help
 ```
 
-このリポジトリには、アプリ・CLI・共通処理・アイコン・ビルド設定を収録しています。
+CLIの出力は英語です。通常のJSONはアプリに必要な項目を返し、診断用の完全な保存記録は`--json --full-details`で取得します。`--database-only`はモニターと通信せず、保存済みのCN情報だけを読み取ります。
+
+このリポジトリにはアプリ・CLI・共通処理・アイコン・ビルド設定を収録しています。

@@ -34,11 +34,23 @@ final class ReminderAppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in await notifier?.deliverLatest() }
         }
         controller.install()
+        if !isDemo {
+            let center = NSWorkspace.shared.notificationCenter
+            for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+                center.addObserver(self, selector: #selector(workspaceDidWake(_:)), name: name, object: nil)
+            }
+        }
         model.start()
         updater.start()
-        Task { @MainActor in await notifier.prepare() }
         if ProcessInfo.processInfo.arguments.contains("--preferences") { controller.showPreferences(nil) }
     }
 
-    func applicationWillTerminate(_ notification: Notification) { model?.stop() }
+    @objc nonisolated private func workspaceDidWake(_ notification: Notification) {
+        Task { @MainActor [weak self] in self?.model?.refreshAfterWake() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        model?.stop()
+    }
 }

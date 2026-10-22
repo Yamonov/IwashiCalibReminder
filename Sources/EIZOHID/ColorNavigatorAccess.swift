@@ -11,6 +11,12 @@ public struct ColorNavigatorAccessCheck: Codable, Sendable {
     public let allowsMonitorAccess: Bool
     public let processes: [ColorNavigatorProcessState]
     public let message: String
+
+    public var denial: AcquisitionFailure? {
+        guard !allowsMonitorAccess else { return nil }
+        return AcquisitionFailure(state == "interfaceRunning" ? .cnInUse : .cnStateUnknown,
+                                  detail: message, operation: "checkCN")
+    }
 }
 
 public enum ColorNavigatorAccess {

@@ -19,25 +19,20 @@ final class ReminderNotifier: NSObject, UNUserNotificationCenterDelegate {
         super.init()
     }
 
-    func prepare() async {
-        guard !isDemo else { return }
-        UNUserNotificationCenter.current().delegate = self
-        if await authorize() { await deliverLatest() }
-    }
-
     private func authorize() async -> Bool {
         if let authorizationTask { return await authorizationTask.value }
         let task = Task { @MainActor [weak self] in
             let center = UNUserNotificationCenter.current()
+            center.delegate = self
             let status = await center.notificationSettings().authorizationStatus
             do {
                 let allowed: Bool
                 if status == .notDetermined { allowed = try await center.requestAuthorization(options: [.alert]) }
                 else { allowed = status == .authorized || status == .provisional }
-                self?.notice = allowed ? nil : "macOSの通知が許可されていません"
+                self?.notice = allowed ? nil : L10n.text("macOS notifications are not allowed")
                 return allowed
             } catch {
-                self?.notice = "macOSの通知を利用できません"
+                self?.notice = L10n.text("macOS notifications are unavailable")
                 return false
             }
         }
@@ -65,11 +60,11 @@ final class ReminderNotifier: NSObject, UNUserNotificationCenterDelegate {
         guard !rows.isEmpty else { return }
         let content = UNMutableNotificationContent()
         content.title = rows.contains { ($0.remainingMinutes ?? 1) < 0 }
-            ? "再キャリブレーションの期限を過ぎています" : "再キャリブレーションの時期が近づいています"
+            ? L10n.text("Recalibration is overdue") : L10n.text("Recalibration is due soon")
         content.body = rows.prefix(8).map {
-            "\(menu.monitorLabel(for: $0) ?? $0.monitorName) \($0.modeName)：\($0.remainingText)"
+            L10n.text("%1$@ %2$@: %3$@", menu.monitorLabel(for: $0) ?? $0.monitorName, $0.modeName, $0.remainingText)
         }.joined(separator: "\n")
-        if rows.count > 8 { content.body += "\nほか\(rows.count - 8)モード" }
+        if rows.count > 8 { content.body += "\n" + L10n.text("Additional modes: %ld", rows.count - 8) }
         content.threadIdentifier = "calibration-reminder"
         do {
             try await UNUserNotificationCenter.current().add(UNNotificationRequest(
@@ -77,7 +72,7 @@ final class ReminderNotifier: NSObject, UNUserNotificationCenterDelegate {
             let updated = delivered.union(rows.compactMap(ReminderNotificationRules.key))
             defaults.set(updated.sorted(), forKey: "deliveredCalibrationReminders")
             notice = nil
-        } catch { notice = "通知を送信できませんでした" }
+        } catch { notice = L10n.text("Unable to send the notification") }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,

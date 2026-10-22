@@ -9,7 +9,7 @@ public enum DemoData {
             ["modeNumber": number, "targetID": "demo-\(number)", "targetName": "\(name) Target",
              "modeName": name, "modeType": number <= 5 ? "Standard" : "Calibration", "status": "available",
              "historyScope": number <= 5 ? "sharedStandardModes" : "target",
-             "targetDetails": ["targetSetting": [
+             "targetDetails": ["profileUpdateRule": "Everytime", "targetSetting": [
                 "brightness": ["type": "Candela", "value": 80],
                 "whitePoint": ["type": "Standard", "value": "D50"],
                 "gamma": ["type": "Gamma", "value": 2.2],
@@ -31,6 +31,8 @@ public enum DemoData {
             "modeAvailability": ["status": "available", "modeCount": 10, "enabledModeNumbers": definitions.map(\.0)]
         ]
         let history: [String: Any] = ["sourcePath": "demo", "status": "available", "colorModes": modes,
+                                    "commonSettings": ["checkResolution": true, "appliesICCProfile": true,
+                                        "checkSignalInfoWarning": true, "checkVideoCardGammaChangeToMakeItLinear": true],
                                     "managementPolicy": ["type": "CNCalibration", "scheduleType": "EveryUsageTime", "intervalHours": 200]]
         let decoder = JSONDecoder()
         let monitor = try decoder.decode(MonitorReading.self, from: JSONSerialization.data(withJSONObject: reading))

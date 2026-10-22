@@ -76,15 +76,18 @@ final class MonitorReader {
     let layout: MonitorControlLayout
     let verbose: Bool
     let refreshID: String?
+    private let accessCheck: () -> ColorNavigatorAccessCheck
     private let started = ProcessInfo.processInfo.systemUptime
     var monitor: CNRegisteredMonitor?
     var statistics = MonitorDiscoveryStatistics()
 
-    init(device: any MonitorDevice, layout: MonitorControlLayout, verbose: Bool, refreshID: String?) {
+    init(device: any MonitorDevice, layout: MonitorControlLayout, verbose: Bool, refreshID: String?,
+         accessCheck: @escaping () -> ColorNavigatorAccessCheck) {
         self.device = device
         self.layout = layout
         self.verbose = verbose
         self.refreshID = refreshID
+        self.accessCheck = accessCheck
     }
 
     var identity: MonitorIdentity { device.connection.identity(monitor) }
@@ -147,6 +150,8 @@ final class MonitorReader {
             let count = try capabilities.modeByteCount()
             availability = try MonitorModeAvailability.decode(readValue(usage: 0xFF0000F4, count: count))
         } catch {
+            let failure = AcquisitionFailure.wrapping(error)
+            if failure.kind == .cnInUse || failure.kind == .cnStateUnknown { throw failure }
             availability = .unavailable(String(describing: error))
             record("monitor.mode_state_failed", fields: ["operation": "enabledModes", "detail": String(describing: error)], level: .error)
         }
@@ -175,6 +180,7 @@ final class MonitorReader {
               bytes.first == report.id, bytes.count == report.length else {
             throw ProbeError("Refusing a report other than descriptor selection or a read request")
         }
+        if let denial = accessCheck().denial { throw denial }
         statistics.featureSets += 1
         if verbose { FileHandle.standardError.write(Data("REQUEST \(report.id) [\(bytes.count) bytes]\n".utf8)) }
         try device.sendReadRequest(bytes)

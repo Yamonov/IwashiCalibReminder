@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import IOKit.hid
 
@@ -33,6 +34,9 @@ public enum MonitorProbe {
         guard !registeredMonitors.isEmpty else {
             throw AcquisitionFailure(.noRegisteredMonitors, detail: "No monitors are registered in the ColorNavigator database", operation: "readRegistrations")
         }
+        let store = MonitorDiscoveryCacheStore.standard
+        let lease = try MonitorReadLease.acquire(at: store.url.deletingLastPathComponent().appendingPathComponent("read.lock"))
+        defer { lease.release() }
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         // Enumeration uses IOKit's existing registry. Devices are opened individually
         // only when an identity or a registered monitor's current values are needed.
@@ -43,7 +47,6 @@ public enum MonitorProbe {
                 ($0.connection.locationID, $0.connection.registryID ?? "")
                     < ($1.connection.locationID, $1.connection.registryID ?? "")
             }
-        let store = MonitorDiscoveryCacheStore.standard
         var cache = store.load()
         var result = MonitorDiscovery.read(devices: devices, registered: registeredMonitors, cache: &cache,
             format: format, verbose: verbose, refreshID: refreshID)
@@ -69,11 +72,42 @@ public enum MonitorProbe {
     }
 
     public static func checkAccess() throws {
-        let access = ColorNavigatorAccess.check()
-        guard access.allowsMonitorAccess else {
-            throw AcquisitionFailure(access.state == "interfaceRunning" ? .cnInUse : .cnStateUnknown,
-                                     detail: access.message, operation: "checkCN")
+        if let denial = ColorNavigatorAccess.check().denial { throw denial }
+    }
+}
+
+/// Coordinates this app's own readers only. It never opens or locks CN's database.
+/// Nonblocking flock avoids competing HID transactions; process exit also releases it.
+final class MonitorReadLease {
+    private var descriptor: Int32?
+    private init(_ descriptor: Int32) { self.descriptor = descriptor }
+    deinit { release() }
+
+    static func acquire(at url: URL) throws -> MonitorReadLease {
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+        } catch {
+            throw AcquisitionFailure(.helper, detail: "Cannot prepare the monitor-read lock: \(error)", operation: "acquireMonitorLease")
         }
+        let descriptor = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else {
+            throw AcquisitionFailure(.helper, detail: "Cannot open the monitor-read lock (errno \(errno))", operation: "acquireMonitorLease")
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            close(descriptor)
+            throw AcquisitionFailure(code == EWOULDBLOCK || code == EAGAIN ? .readerBusy : .helper,
+                detail: "Another reader is active or the monitor-read lock is unavailable (errno \(code))", operation: "acquireMonitorLease")
+        }
+        return MonitorReadLease(descriptor)
+    }
+
+    func release() {
+        guard let descriptor else { return }
+        self.descriptor = nil
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
     }
 }
 

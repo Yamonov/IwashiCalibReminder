@@ -30,7 +30,7 @@ extension MonitorReading {
 public struct AcquisitionFailure: Error, Codable, Sendable, LocalizedError {
     public enum Kind: String, Codable, Sendable {
         case cnInUse, cnStateUnknown, notFound, noRegisteredMonitors, communication, unsupported, invalidResponse
-        case databaseUnavailable, helper
+        case databaseUnavailable, helper, readerBusy
     }
 
     public let kind: Kind
@@ -49,7 +49,7 @@ public struct AcquisitionFailure: Error, Codable, Sendable, LocalizedError {
 
     public var diagnosticLevel: DiagnosticEvent.Level {
         switch kind {
-        case .cnInUse, .notFound, .noRegisteredMonitors: .notice
+        case .cnInUse, .notFound, .noRegisteredMonitors, .readerBusy: .notice
         default: .error
         }
     }

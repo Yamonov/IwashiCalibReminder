@@ -13,6 +13,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var preferencesWindow: ReminderPreferencesController?
     private var menuIsOpen = false
+    private var displayTask: Task<Void, Never>?
+
+    deinit { displayTask?.cancel() }
 
     init(model: ReminderModel, preferences: ReminderPreferences, notifier: ReminderNotifier, updater: AppUpdater) {
         self.model = model; self.preferences = preferences; self.notifier = notifier
@@ -40,7 +43,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     private var messages: [String] {
-        var result = model.isDemo ? ["デモ表示"] : model.globalMessages
+        var result = model.isDemo ? [L10n.text("Demo")] : model.globalMessages
         if let notice = notifier.notice { result.append(notice) }
         if let failure = updater.startupFailure { result.append(failure) }
         return result
@@ -48,44 +51,60 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func updateStatusImage() {
         let graph = ReminderStatusGraph(monitors: model.monitors, thresholdMinutes: preferences.thresholdMinutes)
-        let description = graph.earliest?.remainingMinutes.map(ReminderText.remaining) ?? "残り時間は不明"
+        let description = graph.earliest?.remainingMinutes.map(ReminderText.remaining) ?? L10n.text("Remaining time is unknown")
         let issues = model.monitors.compactMap(\.message)
-        let updateNotice = updater.updateAvailable ? ["アップデートがあります"] : []
+        let updateNotice = updater.updateAvailable ? [L10n.text("An app update is available")] : []
         statusItem?.button?.image = GraphImage.make(status: graph, showsUpdateIndicator: updater.updateAvailable)
         let descriptions = ["IwashiCalibReminder", description] + messages + issues + updateNotice
         statusItem?.button?.toolTip = descriptions.joined(separator: " — ")
-        statusItem?.button?.setAccessibilityLabel(descriptions.joined(separator: "、"))
+        statusItem?.button?.setAccessibilityLabel(descriptions.joined(separator: L10n.text(", ")))
+        scheduleDisplayChange(graph.nextDisplayChange)
+    }
+
+    private func scheduleDisplayChange(_ date: Date?) {
+        displayTask?.cancel()
+        displayTask = nil
+        guard let date else { return }
+        let delay = max(1, date.timeIntervalSinceNow)
+        displayTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(delay), tolerance: .seconds(1)) }
+            catch { return }
+            guard !Task.isCancelled, let self else { return }
+            displayTask = nil
+            updateStatusImage()
+        }
     }
 
     // Rebuild presentation from the cached snapshot only. This never calls refresh().
     func menuNeedsUpdate(_ menu: NSMenu) {
+        updateStatusImage()
         menu.removeAllItems()
-        for message in messages {
-            let item = ReadableMenuInformation.item(message)
-            item.toolTip = model.message?.isEmpty == false ? model.message : message
-            menu.addItem(item)
-        }
-        if !messages.isEmpty { separator() }
+        menuBuilder.appendMessages(messages, to: menu, detail: model.message)
         let data = ReminderMenuData(monitors: model.monitors)
         menuBuilder.appendGroups(to: menu, data: data)
         separator()
-        let refresh = action("情報更新", selector: #selector(refreshInformation(_:)))
+        let refresh = action(L10n.text("Refresh information"), selector: #selector(refreshInformation(_:)))
         refresh.isEnabled = model.phase != .loading
         separator()
-        action("環境設定…", selector: #selector(showPreferences(_:)))
+        action(L10n.text("About IwashiCalibReminder..."), selector: #selector(showAbout(_:)))
+        let update = action(updater.updateAvailable ? L10n.text("An app update is available") : L10n.text("Check for updates..."),
+                            selector: #selector(checkForUpdates(_:)))
+        update.isEnabled = updater.canCheckForUpdates
         if updater.updateAvailable {
-            let update = action("アップデートがあります", selector: #selector(checkForUpdates(_:)))
-            update.isEnabled = updater.canCheckForUpdates
             update.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)?
                 .withSymbolConfiguration(.init(pointSize: 13, weight: .regular)
                     .applying(.init(paletteColors: [.systemBlue])))
             update.image?.isTemplate = false
         }
         separator()
-        action("終了", selector: #selector(quit(_:)))
+        action(L10n.text("Settings"), selector: #selector(showPreferences(_:)))
+        separator()
+        action(L10n.text("Quit"), selector: #selector(quit(_:)))
     }
 
     func menuWillOpen(_ menu: NSMenu) { menuIsOpen = true }
+
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) { menuBuilder.highlight(item) }
 
     func menuDidClose(_ menu: NSMenu) {
         menuIsOpen = false
@@ -110,6 +129,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func refreshInformation(_ sender: Any?) { model.refresh() }
     @objc private func checkForUpdates(_ sender: Any?) { updater.checkForUpdates() }
+    @objc private func showAbout(_ sender: Any?) {
+        NSApplication.shared.activate()
+        NSApplication.shared.orderFrontStandardAboutPanel(sender)
+    }
     @objc private func quit(_ sender: Any?) { NSApplication.shared.terminate(sender) }
 
     @objc func showPreferences(_ sender: Any?) {
@@ -127,21 +150,21 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "IwashiCalibReminder")
-        let prefs = NSMenuItem(title: "環境設定…", action: #selector(showPreferences(_:)), keyEquivalent: "")
+        let prefs = NSMenuItem(title: L10n.text("Settings"), action: #selector(showPreferences(_:)), keyEquivalent: "")
         prefs.target = self
         appMenu.addItem(prefs)
         appMenu.addItem(.separator())
-        let quit = NSMenuItem(title: "IwashiCalibReminderを終了", action: #selector(quit(_:)), keyEquivalent: "")
+        let quit = NSMenuItem(title: L10n.text("Quit IwashiCalibReminder"), action: #selector(quit(_:)), keyEquivalent: "")
         quit.target = self
         appMenu.addItem(quit)
         appItem.submenu = appMenu
         main.addItem(appItem)
-        let editItem = NSMenuItem(title: "編集", action: nil, keyEquivalent: "")
-        let edit = NSMenu(title: "編集")
-        for (title, selector) in [("カット", #selector(NSText.cut(_:))),
-                                       ("コピー", #selector(NSText.copy(_:))),
-                                       ("ペースト", #selector(NSText.paste(_:))),
-                                       ("すべてを選択", #selector(NSText.selectAll(_:)))] {
+        let editItem = NSMenuItem(title: L10n.text("Edit"), action: nil, keyEquivalent: "")
+        let edit = NSMenu(title: L10n.text("Edit"))
+        for (title, selector) in [(L10n.text("Cut"), #selector(NSText.cut(_:))),
+                                       (L10n.text("Copy"), #selector(NSText.copy(_:))),
+                                       (L10n.text("Paste"), #selector(NSText.paste(_:))),
+                                       (L10n.text("Select All"), #selector(NSText.selectAll(_:)))] {
             edit.addItem(NSMenuItem(title: title, action: selector, keyEquivalent: ""))
         }
         editItem.submenu = edit

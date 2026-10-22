@@ -11,15 +11,16 @@ public struct ReminderMenuRow: Sendable, Identifiable {
     public let remainingMinutes: Int64?
     public let intervalMinutes: Int64?
     public let calibrationID: String?
+    public var nextCalibrationDate: String? = nil
 
     public var id: String { "\(monitorID)/\(modeNumber)" }
 
     public var remainingText: String {
-        guard let remainingMinutes else { return "不明" }
+        guard let remainingMinutes else { return L10n.text("Unknown") }
         let magnitude = remainingMinutes.magnitude
         let hours = magnitude / 60 + (magnitude % 60 >= 30 ? 1 : 0)
-        let duration = "約 \(hours)時間"
-        return remainingMinutes < 0 ? "\(duration)超過" : duration
+        let duration = L10n.text("Approx. %llu h", hours)
+        return remainingMinutes < 0 ? L10n.text("%@ overdue", duration) : duration
     }
 }
 
@@ -31,6 +32,8 @@ public struct ReminderMonitorGroup: Sendable, Identifiable {
     public let detail: String?
     public let lastSuccessAt: Date?
     public let isStale: Bool
+    public let isShowingPrevious: Bool
+    public let information: MonitorInformationValue?
     public let rows: [ReminderMenuRow]
 }
 
@@ -41,14 +44,15 @@ public struct ReminderMenuData: Sendable {
     public let issue: String?
     public let groups: [ReminderMonitorGroup]
 
-    public init(reports: [MonitorUsageReport]) {
-        self.init(monitors: reports.map(MonitorDisplayState.current))
+    public init(reports: [MonitorUsageReport], at date: Date = .now) {
+        self.init(monitors: reports.map(MonitorDisplayState.current), at: date)
     }
 
-    public init(monitors: [MonitorDisplayState]) {
-        let reports = monitors.compactMap(\.report)
+    public init(monitors: [MonitorDisplayState], at date: Date = .now) {
         monitorIDs = monitors.map(\.id).sorted()
-        rows = reports.flatMap { report -> [ReminderMenuRow] in
+        rows = monitors.flatMap { state -> [ReminderMenuRow] in
+            if let previous = state.previousRows { return previous }
+            guard let report = state.report else { return [] }
             let history = report.calibrationHistory
             let interval = history.managementPolicy?.intervalHours.flatMap { hours -> Int64? in
                 let (minutes, overflow) = Int64(hours).multipliedReportingOverflow(by: 60)
@@ -62,9 +66,9 @@ public struct ReminderMenuData: Sendable {
                     monitorID: report.monitor.identity.id,
                     monitorName: report.monitor.model.replacingOccurrences(of: "ColorEdge ", with: ""),
                     serialNumber: report.monitor.serialNumber, modeNumber: mode.modeNumber,
-                    modeName: name ?? "モード \(mode.modeNumber)", badge: badge,
-                    remainingMinutes: countdown?.remainingMinutes, intervalMinutes: interval,
-                    calibrationID: mode.lastCalibration?.resultID
+                    modeName: name ?? L10n.text("Mode %ld", mode.modeNumber), badge: badge,
+                    remainingMinutes: countdown?.remaining(at: date), intervalMinutes: countdown?.intervalMinutes ?? interval,
+                    calibrationID: mode.lastCalibration?.resultID, nextCalibrationDate: countdown?.nextCalibrationDate
                 )
             }
         }.sorted { lhs, rhs in
@@ -81,16 +85,17 @@ public struct ReminderMenuData: Sendable {
         let unique = issues.reduce(into: [String]()) { result, issue in
             if !result.contains(issue) { result.append(issue) }
         }
-        issue = unique.isEmpty ? nil : unique.joined(separator: "／")
+        issue = unique.isEmpty ? nil : unique.joined(separator: L10n.text(" / "))
         let sortedRows = rows
-        let identities = monitorIDs
         groups = monitors.map { state in
             let id = state.id
-            let name = state.identity.model?.replacingOccurrences(of: "ColorEdge ", with: "") ?? "モニター"
-            let number = (identities.firstIndex(of: id) ?? 0) + 1
-            return ReminderMonitorGroup(id: id, title: identities.count > 1 ? "\(name)・\(number)" : name,
+            let name = state.identity.model?.replacingOccurrences(of: "ColorEdge ", with: "") ?? L10n.text("Monitor")
+            let title = state.identity.serialNumber.map { "\(name)(S/N \($0))" } ?? name
+            return ReminderMonitorGroup(id: id, title: title,
                 report: state.report, message: state.message, detail: state.detail,
                 lastSuccessAt: state.lastSuccessAt, isStale: state.isStale,
+                isShowingPrevious: state.isShowingPrevious,
+                information: state.isShowingPrevious ? state.previousInformation : state.report.map(MonitorInformationValue.init),
                 rows: sortedRows.filter { $0.monitorID == id })
         }.sorted { lhs, rhs in
             switch (lhs.rows.first?.remainingMinutes, rhs.rows.first?.remainingMinutes) {
@@ -103,8 +108,8 @@ public struct ReminderMenuData: Sendable {
     }
 
     public func monitorLabel(for row: ReminderMenuRow) -> String? {
-        guard monitorIDs.count > 1, let index = monitorIDs.firstIndex(of: row.monitorID) else { return nil }
-        return "\(row.monitorName)・\(index + 1)"
+        guard monitorIDs.count > 1 else { return nil }
+        return groups.first { $0.id == row.monitorID }?.title
     }
 
 }
