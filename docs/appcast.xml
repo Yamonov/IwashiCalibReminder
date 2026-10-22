@@ -1,9 +1,9 @@
-<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?><!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>IwashiCalibReminder</title>
-        <item>
+        <item><title>1.0</title><pubDate>Thu, 22 Oct 2026 23:20:40 +0900</pubDate><link>https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.0</link><sparkle:fullReleaseNotesLink>https://github.com/Yamonov/IwashiCalibReminder/releases</sparkle:fullReleaseNotesLink><sparkle:version>182</sparkle:version><sparkle:shortVersionString>1.0</sparkle:shortVersionString><sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion><description xml:lang="en"><![CDATA[<p>Official release</p>]]></description><description xml:lang="ja"><![CDATA[<p>正式リリース</p>]]></description><enclosure url="https://github.com/Yamonov/IwashiCalibReminder/releases/download/v1.0/IwashiCalibReminder-1.0.zip" length="4905735" type="application/octet-stream" sparkle:edSignature="I+vVhkmuTMP6pQtbj1C8pfHj3VIqgEKOIO0/hPGyf/XuOx7Rmq73ksSEgwzIBTqts0Qbq+Tpt+Eann2ZaYAQCg=="></enclosure></item><item>
             <title>0.9</title>
             <pubDate>Fri, 16 Oct 2026 16:19:28 +0900</pubDate>
             <link>https://github.com/Yamonov/IwashiCalibReminder</link>
@@ -17,6 +17,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: X28EycpGhePvFyn863speuq6EQYQjv3m0dNwiOsa9DGDEepVBBtlTDKVUs/zvnCLJ2R+An0bgQT4F93wCGdDBw==
-length: 1465
+edSignature: sEyCv+eBrDpu9AWZ89bGuDlv2NphhX/R4zRHSukL/nDXxOEnyYmSX+BPkYkR5cZ5jyCXeEV3mGjAcHFbhcSbAg==
+length: 2360
 -->
