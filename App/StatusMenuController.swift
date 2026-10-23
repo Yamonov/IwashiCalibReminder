@@ -8,6 +8,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private let preferences: ReminderPreferences
     private let notifier: ReminderNotifier
     private let updater: AppUpdater
+    private let loginItem: LoginItemController
     private let menu = NSMenu()
     private let menuBuilder = MonitorMenuBuilder()
     private var statusItem: NSStatusItem?
@@ -17,9 +18,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     deinit { displayTask?.cancel() }
 
-    init(model: ReminderModel, preferences: ReminderPreferences, notifier: ReminderNotifier, updater: AppUpdater) {
+    init(model: ReminderModel, preferences: ReminderPreferences, notifier: ReminderNotifier, updater: AppUpdater,
+         loginItem: LoginItemController) {
         self.model = model; self.preferences = preferences; self.notifier = notifier
         self.updater = updater
+        self.loginItem = loginItem
         super.init()
     }
 
@@ -43,7 +46,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     private var messages: [String] {
-        var result = model.isDemo ? [L10n.text("Demo")] : model.globalMessages
+        var result = model.globalMessages
         if let notice = notifier.notice { result.append(notice) }
         if let failure = updater.startupFailure { result.append(failure) }
         return result
@@ -64,7 +67,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private func scheduleDisplayChange(_ date: Date?) {
         displayTask?.cancel()
         displayTask = nil
-        guard let date else { return }
+        guard !model.isSuspended, let date else { return }
         let delay = max(1, date.timeIntervalSinceNow)
         displayTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(delay), tolerance: .seconds(1)) }
@@ -84,7 +87,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         menuBuilder.appendGroups(to: menu, data: data)
         separator()
         let refresh = action(L10n.text("Refresh information"), selector: #selector(refreshInformation(_:)))
-        refresh.isEnabled = model.phase != .loading
+        refresh.isEnabled = model.canRefresh
         separator()
         action(L10n.text("About IwashiCalibReminder..."), selector: #selector(showAbout(_:)))
         let update = action(updater.updateAvailable ? L10n.text("An app update is available") : L10n.text("Check for updates..."),
@@ -137,7 +140,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc func showPreferences(_ sender: Any?) {
         if preferencesWindow == nil {
-            let controller = ReminderPreferencesController(preferences: preferences, notifier: notifier, updater: updater)
+            let controller = ReminderPreferencesController(preferences: preferences, notifier: notifier,
+                updater: updater, loginItem: loginItem)
             controller.onClose = { [weak self] in self?.preferencesWindow = nil }
             preferencesWindow = controller
         }

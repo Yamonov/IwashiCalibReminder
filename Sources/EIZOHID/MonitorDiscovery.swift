@@ -4,7 +4,8 @@ enum MonitorDiscovery {
     /// Called once for an explicit update. No polling, retries, or persistent HID handles.
     static func read(devices: [any MonitorDevice], registered: [CNRegisteredMonitor],
                      cache: inout MonitorDiscoveryCache, format: String = "auto", verbose: Bool = false,
-                     refreshID: String? = nil, accessCheck: @escaping () -> ColorNavigatorAccessCheck = ColorNavigatorAccess.check) -> MonitorProbeResult {
+                     refreshID: String? = nil, accessCheck: @escaping () -> ColorNavigatorAccessCheck = ColorNavigatorAccess.check,
+                     powerCheck: @escaping () -> AcquisitionFailure? = { nil }) -> MonitorProbeResult {
         var result = MonitorProbeResult()
         result.discovery.enumeratedDevices = devices.count
         result.discovery.registeredMonitors = registered.count
@@ -29,9 +30,11 @@ enum MonitorDiscovery {
             }
             do {
                 let layout = try MonitorControlLayout(device.connection.primaryDescriptor)
-                let session = MonitorReader(device: device, layout: layout, verbose: verbose, refreshID: refreshID, accessCheck: accessCheck)
+                let session = MonitorReader(device: device, layout: layout, verbose: verbose, refreshID: refreshID,
+                    accessCheck: accessCheck, powerCheck: powerCheck)
                 reader = session
                 session.monitor = cached?.monitor
+                if let denial = powerCheck() { throw denial }
                 if let denial = accessCheck().denial { throw denial }
                 // Opening only this device keeps a failure on one monitor local to it.
                 try device.open()
@@ -46,7 +49,7 @@ enum MonitorDiscovery {
                 result.readings.append(try session.read(capabilities: capabilities, format: format))
             } catch {
                 let failure = AcquisitionFailure.wrapping(error)
-                if failure.kind == .cnInUse || failure.kind == .cnStateUnknown {
+                if [.cnInUse, .cnStateUnknown, .displayAsleep, .displayStateUnknown].contains(failure.kind) {
                     result.globalFailures.append(failure)
                     break
                 }

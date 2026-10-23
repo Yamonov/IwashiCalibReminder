@@ -4,8 +4,9 @@ import Observation
 
 @Observable @MainActor
 public final class ReminderModel {
-    public enum Phase: Equatable { case idle, loading, ready, blocked, failed }
-    public enum RefreshReason: String, Sendable { case startup, scheduled, manual, wake }
+    public enum Phase: Equatable { case idle, waiting, suspended, loading, ready, blocked, failed }
+    public enum RefreshReason: String, Sendable { case startup, scheduled, manual, wake, login, retry }
+    public enum PowerEvent: String, Sendable { case systemWillSleep, displaysDidSleep, systemDidWake, displaysDidWake }
     public private(set) var phase: Phase = .idle
     public private(set) var reports: [MonitorUsageReport] = []
     public private(set) var monitors: [MonitorDisplayState] = []
@@ -13,43 +14,82 @@ public final class ReminderModel {
     public private(set) var message: String?
     public private(set) var attemptedAt: Date?
     public private(set) var updatedAt: Date?
-    public let isDemo: Bool
+    public var isSuspended: Bool { phase == .suspended }
+    public var canRefresh: Bool { !stopped && !isSuspended && refreshTask == nil }
+
+    private struct Attempt: Sendable {
+        var reason: RefreshReason
+        var recovery: RefreshReason?
+        var retryIndex = 0
+    }
+
+    private struct ReadState {
+        let id: UUID
+        let phase: Phase
+        let messages: [String]
+        let detail: String?
+    }
 
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
-    @ObservationIgnored private var timerTask: Task<Void, Never>?
-    @ObservationIgnored private var wakeTask: Task<Void, Never>?
-    @ObservationIgnored private var wakeGeneration: UUID?
-    @ObservationIgnored private(set) var wakeRefreshPending = false
-    @ObservationIgnored private let wakeWait: @Sendable () async throws -> Void
+    @ObservationIgnored private var activeRead: ReadState?
+    @ObservationIgnored private var delayTask: Task<Void, Never>?
+    @ObservationIgnored private var delayGeneration: UUID?
+    @ObservationIgnored private var scheduledAttempt: Attempt?
+    @ObservationIgnored private var pendingAttempt: Attempt?
+    @ObservationIgnored private var loginDeadline: ContinuousClock.Instant?
+    @ObservationIgnored private var systemSleeping = false
+    @ObservationIgnored private var displaysSleeping = false
+    @ObservationIgnored private var started = false
+    @ObservationIgnored private var stopped = false
+    @ObservationIgnored private var initialWaitFinished = false
+    @ObservationIgnored private let timing: RefreshTiming
+    @ObservationIgnored private let now: @Sendable () -> ContinuousClock.Instant
+    @ObservationIgnored private let wait: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let reader: @Sendable (String) async throws -> MonitorRefreshResult
     @ObservationIgnored private let diagnostics: DiagnosticLog?
     @ObservationIgnored private var saved: [String: SavedMonitor] = [:]
     @ObservationIgnored private let accessCheck: @MainActor () -> ColorNavigatorAccessCheck
+    @ObservationIgnored private let displayState: @MainActor () -> DisplayPowerState
     @ObservationIgnored private let refreshInterval: Duration
     @ObservationIgnored public var didRead: (@MainActor ([MonitorUsageReport]) -> Void)?
+    @ObservationIgnored public var didFinishInitialWait: (@MainActor () -> Void)?
+    var wakeRefreshPending: Bool { pendingAttempt?.reason == .wake }
 
-    public init(isDemo: Bool = false, refreshInterval: Duration = .seconds(3_600),
+    deinit {
+        // A weak capture does not end a task. Request cancellation when the
+        // owner disappears so cooperative operations can release their captures.
+        refreshTask?.cancel()
+        delayTask?.cancel()
+    }
+
+    public init(refreshInterval: Duration = .seconds(3_600),
                 reader: (@Sendable () async throws -> [MonitorUsageReport])? = nil,
                 snapshotReader: @escaping @Sendable (String) async throws -> MonitorRefreshResult = {
                     try await HelperClient.bundled().readSnapshot(refreshID: $0)
                 }, diagnostics: DiagnosticLog? = nil,
                 accessCheck: @escaping @MainActor () -> ColorNavigatorAccessCheck = { ColorNavigatorAccess.check() },
-                wakeWait: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: .seconds(3)) }) {
-        self.isDemo = isDemo
+                displayState: @escaping @MainActor () -> DisplayPowerState = { DisplayPowerState.current() },
+                timing: RefreshTiming = RefreshTiming(),
+                now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
+                wait: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.refreshInterval = refreshInterval
         if let reader { self.reader = { _ in MonitorRefreshResult(reports: try await reader()) } }
         else { self.reader = snapshotReader }
         self.diagnostics = diagnostics
         self.accessCheck = accessCheck
-        self.wakeWait = wakeWait
+        self.displayState = displayState
+        self.timing = timing
+        self.now = now
+        self.wait = wait
     }
 
     public var summary: ReminderSummary { ReminderSummary(reports: reports) }
 
     public var menuTitle: String {
-        if isDemo { return L10n.text("Demo %@", summary.remainingMinutes.map(ReminderText.menuTitle) ?? "—") }
         switch phase {
         case .idle, .loading: return L10n.text("Reading…")
+        case .waiting: return L10n.text("Waiting to read…")
+        case .suspended: return L10n.text("Reading paused")
         case .blocked: return L10n.text("CN in use")
         case .failed: return L10n.text("Unavailable")
         case .ready: return summary.remainingMinutes.map(ReminderText.menuTitle) ?? L10n.text("Remaining —")
@@ -57,108 +97,234 @@ public final class ReminderModel {
     }
 
     public var symbol: String {
-        if phase == .blocked { return "pause.circle" }
+        if phase == .blocked || phase == .suspended { return "pause.circle" }
         if phase == .failed { return "exclamationmark.triangle" }
         if let minutes = summary.remainingMinutes, minutes <= 0 { return "display.trianglebadge.exclamationmark" }
         return "display"
     }
 
-    public func start() {
-        guard timerTask == nil else { return }
-        refresh(reason: .startup)
-        timerTask = Task.detached(priority: .utility) { [weak self, refreshInterval] in
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: refreshInterval) }
-                catch { return }
-                guard let model = self else { return }
-                await model.refresh(reason: .scheduled)
-            }
-        }
+    public func start(launchReason: ApplicationLaunchReason = .regular) {
+        guard !started else { return }
+        stopped = false
+        started = true
+        if launchReason == .loginItem {
+            loginDeadline = now().advanced(by: timing.login)
+            if displayState() == .asleep { suspend() }
+            else { schedule(Attempt(reason: .login, recovery: .login), after: timing.login) }
+        } else { refresh(reason: .startup) }
     }
 
     public func refresh(reason: RefreshReason = .manual) {
-        guard !Task.isCancelled, refreshTask == nil else { return }
-        if reason == .scheduled, wakeTask != nil || wakeRefreshPending { return }
-        if reason == .manual { cancelWakeRefresh() }
-        attemptedAt = .now
-        message = nil
-        let identifier = UUID().uuidString
-        let started = ProcessInfo.processInfo.systemUptime
-        diagnostics?.record(DiagnosticEvent("refresh.started", fields: [
-            "refreshID": identifier, "reason": reason.rawValue,
-            "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
-            "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""], level: .debug))
-        if !isDemo {
-            if let failure = accessCheck().denial {
-                apply(MonitorRefreshResult(globalFailures: [failure]))
-                logCompletion(identifier, started: started, failures: [failure])
-                return
-            }
-        }
-        phase = .loading
-        // Retain the displayed reading until this explicit update completes.
-        globalMessages = [L10n.text("Refreshing monitor information…")]
-        // Keep I/O outside the UI actor and cross back explicitly for publication.
-        // The production default reader must follow the same path as injected readers.
-        refreshTask = Task.detached(priority: .utility) { [weak self, reader, isDemo] in
-            let result: MonitorRefreshResult
-            do {
-                if isDemo {
-                    result = MonitorRefreshResult(reports: try DemoData.reports())
-                } else {
-                    result = try await reader(identifier)
-                }
-            } catch {
-                let failure = AcquisitionFailure(.helper, detail: error.localizedDescription, operation: "runHelper")
-                result = MonitorRefreshResult(globalFailures: [failure])
-            }
-            guard !Task.isCancelled else { return }
-            await self?.finishRefresh(result, identifier: identifier, started: started)
+        guard !Task.isCancelled, !stopped, refreshTask == nil else { return }
+        if reason == .scheduled, scheduledAttempt != nil || pendingAttempt != nil { return }
+        if reason == .manual { loginDeadline = nil }
+        cancelSchedule()
+        perform(Attempt(reason: reason, recovery: [.wake, .login].contains(reason) ? reason : nil))
+    }
+
+    public func handlePowerEvent(_ event: PowerEvent) {
+        guard !stopped else { return }
+        diagnostics?.record(DiagnosticEvent("power.changed", fields: ["event": event.rawValue], level: .notice))
+        switch event {
+        case .systemWillSleep:
+            systemSleeping = true
+            suspend()
+        case .displaysDidSleep:
+            displaysSleeping = true
+            suspend()
+        case .systemDidWake:
+            systemSleeping = false
+            displaysSleeping = displayState() == .asleep
+            refreshAfterWake()
+        case .displaysDidWake:
+            displaysSleeping = false
+            refreshAfterWake()
         }
     }
 
-    /// Coalesce system-wake and display-wake notifications after the final event.
+    /// Coalesce wake notifications, without shortening an outstanding login delay.
     public func refreshAfterWake() {
-        cancelWakeRefresh()
+        guard !stopped else { return }
+        if systemSleeping || displaysSleeping {
+            suspend()
+            return
+        }
+        freezePreviousReading()
+        let reason: RefreshReason = loginDeadline == nil ? .wake : .login
+        schedule(Attempt(reason: reason, recovery: reason), after: timing.wake)
+    }
+
+    private func schedule(_ attempt: Attempt, after delay: Duration) {
+        cancelSchedule()
         let generation = UUID()
-        wakeGeneration = generation
-        phase = .loading
-        globalMessages = [L10n.text("Refreshing monitor information…")]
-        wakeTask = Task.detached(priority: .utility) { [weak self, wakeWait] in
-            do { try await wakeWait() }
+        delayGeneration = generation
+        scheduledAttempt = attempt
+        let current = now()
+        let deadline = max(current.advanced(by: delay), loginDeadline ?? current)
+        let duration = current.duration(to: deadline)
+        if attempt.reason != .scheduled { showWaiting(attempt) }
+        diagnostics?.record(DiagnosticEvent("refresh.scheduled", fields: [
+            "reason": attempt.reason.rawValue, "attempt": String(attempt.retryIndex),
+            "delaySeconds": String(Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18)],
+            level: attempt.reason == .scheduled ? .debug : .notice))
+        delayTask = Task.detached(priority: .utility) { [weak self, wait] in
+            do { try await wait(duration) }
             catch { return }
             guard !Task.isCancelled else { return }
-            await self?.finishWakeDelay(generation)
+            await self?.delayFinished(generation, attempt: attempt)
         }
     }
 
-    private func finishWakeDelay(_ generation: UUID) {
-        guard wakeGeneration == generation else { return }
-        wakeTask = nil
-        wakeGeneration = nil
-        if refreshTask != nil { wakeRefreshPending = true }
-        else { refresh(reason: .wake) }
+    private func delayFinished(_ generation: UUID, attempt: Attempt) {
+        guard !stopped, delayGeneration == generation else { return }
+        delayTask = nil
+        delayGeneration = nil
+        scheduledAttempt = nil
+        if refreshTask != nil { pendingAttempt = attempt }
+        else { perform(attempt) }
     }
 
-    private func cancelWakeRefresh() {
-        wakeTask?.cancel()
-        wakeTask = nil
-        wakeGeneration = nil
-        wakeRefreshPending = false
+    private func cancelSchedule() {
+        delayTask?.cancel()
+        delayTask = nil
+        delayGeneration = nil
+        scheduledAttempt = nil
+        pendingAttempt = nil
     }
 
-    private func finishRefresh(_ result: MonitorRefreshResult, identifier: String, started: TimeInterval) {
-        guard !Task.isCancelled else { return }
+    private func showWaiting(_ attempt: Attempt) {
+        phase = .waiting
+        let text: String
+        if attempt.reason == .retry { text = L10n.text("Waiting to retry monitor information… (%ld/3)", attempt.retryIndex) }
+        else if attempt.reason == .login { text = L10n.text("Waiting to read monitor information after login…") }
+        else { text = L10n.text("Waiting to read monitor information after wake…") }
+        globalMessages = [text]
+    }
+
+    private func perform(_ attempt: Attempt) {
+        guard !Task.isCancelled, !stopped, refreshTask == nil else { return }
+        let power = displayState()
+        if systemSleeping || displaysSleeping { suspend(); return }
+        if power == .asleep {
+            // The workspace wake event can precede WindowServer's power-state
+            // change. Recheck the OS state within the same finite recovery budget;
+            // no helper, DB read or HID operation is started while it is asleep.
+            if let recovery = attempt.recovery, attempt.retryIndex < timing.retries.count {
+                diagnostics?.record(DiagnosticEvent("refresh.power_not_ready",
+                    fields: ["reason": attempt.reason.rawValue, "attempt": String(attempt.retryIndex)], level: .notice))
+                schedule(Attempt(reason: .retry, recovery: recovery, retryIndex: attempt.retryIndex + 1),
+                    after: timing.retries[attempt.retryIndex])
+            } else { suspend() }
+            return
+        }
+        loginDeadline = nil
+        let generation = UUID()
+        activeRead = ReadState(id: generation, phase: phase, messages: globalMessages, detail: message)
+        let identifier = generation.uuidString
+        let began = ProcessInfo.processInfo.systemUptime
+        attemptedAt = .now
+        message = nil
+        diagnostics?.record(DiagnosticEvent("refresh.started", fields: [
+            "refreshID": identifier, "reason": attempt.reason.rawValue, "attempt": String(attempt.retryIndex),
+            "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""], level: .notice))
+        if let failure = power.denial {
+            finishRefresh(MonitorRefreshResult(globalFailures: [failure]), generation: generation, started: began, attempt: attempt)
+            return
+        }
+        if !initialWaitFinished {
+            initialWaitFinished = true
+            didFinishInitialWait?()
+        }
+        if let failure = accessCheck().denial {
+            finishRefresh(MonitorRefreshResult(globalFailures: [failure]), generation: generation, started: began, attempt: attempt)
+            return
+        }
+        phase = .loading
+        globalMessages = [L10n.text("Refreshing monitor information…")]
+        refreshTask = Task.detached(priority: .utility) { [weak self, reader] in
+            let result: MonitorRefreshResult
+            do {
+                result = try await reader(identifier)
+            } catch is CancellationError {
+                await self?.finishCancelledRead(generation)
+                return
+            }
+            catch {
+                let kind: AcquisitionFailure.Kind = (error as? HelperError).map {
+                    if case .timedOut = $0 { return .communication }
+                    return .helper
+                } ?? .helper
+                result = MonitorRefreshResult(globalFailures: [AcquisitionFailure(kind, detail: error.localizedDescription, operation: "runHelper")])
+            }
+            guard !Task.isCancelled else {
+                await self?.finishCancelledRead(generation)
+                return
+            }
+            await self?.finishRefresh(result, generation: generation, started: began, attempt: attempt)
+        }
+    }
+
+    private func finishRefresh(_ result: MonitorRefreshResult, generation: UUID, started began: TimeInterval, attempt: Attempt) {
+        guard !stopped, activeRead?.id == generation else { return }
         refreshTask = nil
+        activeRead = nil
+        if result.globalFailures.contains(where: { $0.kind == .displayAsleep }) { suspend(); return }
         apply(result)
-        logCompletion(identifier, started: started, failures: result.globalFailures)
-        if wakeTask != nil {
-            phase = .loading
-            globalMessages = [L10n.text("Refreshing monitor information…")]
-        } else if wakeRefreshPending {
-            wakeRefreshPending = false
-            refresh(reason: .wake)
-        } else if !reports.isEmpty { didRead?(reports) }
+        logCompletion(generation.uuidString, started: began, failures: result.globalFailures)
+        if let scheduledAttempt { showWaiting(scheduledAttempt); return }
+        if let pendingAttempt {
+            self.pendingAttempt = nil
+            perform(pendingAttempt)
+            return
+        }
+        if let recovery = attempt.recovery, result.needsRecoveryRetry, attempt.retryIndex < timing.retries.count {
+            schedule(Attempt(reason: .retry, recovery: recovery, retryIndex: attempt.retryIndex + 1),
+                     after: timing.retries[attempt.retryIndex])
+            return
+        }
+        if !reports.isEmpty { didRead?(reports) }
+        if started { schedule(Attempt(reason: .scheduled), after: refreshInterval) }
+    }
+
+    private func finishCancelledRead(_ generation: UUID) {
+        guard !stopped, let previous = activeRead, previous.id == generation else { return }
+        refreshTask = nil
+        activeRead = nil
+        phase = previous.phase == .waiting || previous.phase == .loading ? .idle : previous.phase
+        globalMessages = phase == .idle ? [] : previous.messages
+        message = previous.detail
+        if let scheduledAttempt { showWaiting(scheduledAttempt); return }
+        if let pendingAttempt {
+            self.pendingAttempt = nil
+            // Start the pending work in its own task, not in the cancelled
+            // task's context where perform() must refuse to start new I/O.
+            schedule(pendingAttempt, after: .zero)
+        } else if started {
+            schedule(Attempt(reason: .scheduled), after: refreshInterval)
+        }
+    }
+
+    private func freezePreviousReading() {
+        reports = []
+        monitors = monitors.map { state in
+            let previous = saved[state.id]
+            return MonitorDisplayState(identity: state.identity, graphValue: previous?.graph ?? state.graphValue,
+                isStale: true, lastSuccessAt: previous?.date ?? state.lastSuccessAt,
+                previousRows: previous?.rows ?? state.previousRows,
+                previousInformation: previous?.information ?? state.previousInformation)
+        }
+    }
+
+    private func suspend() {
+        cancelSchedule()
+        activeRead = nil
+        refreshTask?.cancel()
+        refreshTask = nil
+        freezePreviousReading()
+        phase = .suspended
+        globalMessages = [L10n.text("Reading is paused while the displays are asleep")]
+        message = nil
     }
 
     private struct SavedMonitor {
@@ -286,9 +452,11 @@ public final class ReminderModel {
     }
 
     public func stop() {
-        cancelWakeRefresh()
-        timerTask?.cancel()
-        timerTask = nil
+        stopped = true
+        started = false
+        cancelSchedule()
+        loginDeadline = nil
+        activeRead = nil
         refreshTask?.cancel()
         refreshTask = nil
     }

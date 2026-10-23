@@ -6,6 +6,7 @@ public struct MonitorModeAvailability: Codable, Sendable {
     public let enabledModeNumbers: [Int]
     public let rawPayload: String?
     public let message: String?
+    public let failure: AcquisitionFailure?
 
     /// EmCtrlGetModeSkip converts zero to "skip"; CN negates that to obtain "enable".
     /// This usage therefore contains one enable byte per zero-based monitor mode.
@@ -13,11 +14,11 @@ public struct MonitorModeAvailability: Codable, Sendable {
         guard !payload.isEmpty, payload.count <= 32 else { throw ProbeError("Unsupported mode-enable payload length") }
         return MonitorModeAvailability(status: "available", modeCount: payload.count,
                                        enabledModeNumbers: payload.enumerated().compactMap { $0.element != 0 ? $0.offset + 1 : nil },
-                                       rawPayload: hex(payload), message: nil)
+                                       rawPayload: hex(payload), message: nil, failure: nil)
     }
 
-    static func unavailable(_ message: String) -> MonitorModeAvailability {
-        MonitorModeAvailability(status: "unavailable", modeCount: nil, enabledModeNumbers: [], rawPayload: nil, message: message)
+    static func unavailable(_ message: String, failure: AcquisitionFailure? = nil) -> MonitorModeAvailability {
+        MonitorModeAvailability(status: "unavailable", modeCount: nil, enabledModeNumbers: [], rawPayload: nil, message: message, failure: failure)
     }
 }
 

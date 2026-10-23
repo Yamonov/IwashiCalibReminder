@@ -253,6 +253,59 @@
       },
       "generatesSymbol": false
     },
+    "Allow launch at login in System Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow launch at login in System Settings."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム設定でログイン時の起動を許可してください。"
+          }
+        }
+      }
+    },
+    "Allow notifications to receive calibration reminders.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow notifications to receive calibration reminders."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャリブレーション時期をお知らせするため、通知を許可してください。"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Allow notifications…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow notifications…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知を許可…"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
     "An app update is available": {
       "extractionState": "manual",
       "localizations": {
@@ -613,6 +666,24 @@
       },
       "generatesSymbol": false
     },
+    "Check again": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check again"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再確認"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
     "Check for updates": {
       "extractionState": "manual",
       "localizations": {
@@ -811,42 +882,6 @@
       },
       "generatesSymbol": false
     },
-    "Demo": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Demo"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "デモ表示"
-          }
-        }
-      },
-      "generatesSymbol": false
-    },
-    "Demo %@": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Demo %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "デモ %@"
-          }
-        }
-      },
-      "generatesSymbol": false
-    },
     "Disabled": {
       "extractionState": "manual",
       "localizations": {
@@ -896,6 +931,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "編集"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Enable notifications for IwashiCalibReminder in System Settings > Notifications.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable notifications for IwashiCalibReminder in System Settings > Notifications."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム設定の「通知」でIwashiCalibReminderの通知を許可してください。"
           }
         }
       },
@@ -1188,6 +1241,23 @@
         }
       },
       "generatesSymbol": false
+    },
+    "Launch at login": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Launch at login"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログイン時に起動"
+          }
+        }
+      }
     },
     "Measurement device": {
       "extractionState": "manual",
@@ -1585,6 +1655,150 @@
       },
       "generatesSymbol": false
     },
+    "Notification permission has not been requested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notification permission has not been requested"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知の許可をまだ確認していません"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Notification settings…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notification settings…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知設定を開く…"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Notifications: Allowed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications: Allowed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知：許可済み"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Notifications: Checking…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications: Checking…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知：確認中…"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Notifications: Delivered quietly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications: Delivered quietly"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知：静かな通知のみ"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Notifications: Not allowed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications: Not allowed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知：未許可"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Notifications: Not requested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications: Not requested"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知：未確認"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Notifications: Unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications: Unavailable"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知：確認できません"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
     "Notify with": {
       "extractionState": "manual",
       "localizations": {
@@ -1638,6 +1852,23 @@
         }
       },
       "generatesSymbol": false
+    },
+    "Open System Settings…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open System Settings…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム設定を開く…"
+          }
+        }
+      }
     },
     "Paste": {
       "extractionState": "manual",
@@ -1710,6 +1941,40 @@
         }
       },
       "generatesSymbol": false
+    },
+    "Reading is paused while the displays are asleep": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading is paused while the displays are asleep"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画面のスリープ中は取得を休止しています"
+          }
+        }
+      }
+    },
+    "Reading paused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading paused"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取得休止中"
+          }
+        }
+      }
     },
     "Reading stopped because a ColorNavigator 7 window is open. The Agent may remain running.": {
       "extractionState": "manual",
@@ -1861,13 +2126,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Remaining time is unavailable for some modes. The earliest deadline includes only modes with sufficient data."
+            "value": "Remaining time is unavailable for some modes.\nThe earliest deadline includes only modes with sufficient data."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "一部のモードは残り時間を計算できません。最短時間は計算できたモードの中での値です。"
+            "value": "一部のモードは残り時間を計算できません。\n最短時間は計算できたモードの中での値です。"
           }
         }
       },
@@ -2197,6 +2462,23 @@
       },
       "generatesSymbol": false
     },
+    "Unable to change launch at login: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to change launch at login: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログイン時の起動設定を変更できません：%@"
+          }
+        }
+      }
+    },
     "Unable to communicate with the monitor": {
       "extractionState": "manual",
       "localizations": {
@@ -2233,6 +2515,23 @@
       },
       "generatesSymbol": false
     },
+    "Unable to determine whether the displays are awake": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to determine whether the displays are awake"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画面のスリープ状態を確認できません"
+          }
+        }
+      }
+    },
     "Unable to interpret the monitor response": {
       "extractionState": "manual",
       "localizations": {
@@ -2264,6 +2563,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "モニターの読み取り結果を解釈できませんでした。"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Unable to open notification settings. Open System Settings > Notifications.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to open notification settings. Open System Settings > Notifications."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通知設定を開けません。システム設定の「通知」を開いてください。"
           }
         }
       },
@@ -2538,6 +2855,74 @@
         }
       },
       "generatesSymbol": false
+    },
+    "Waiting to read monitor information after login…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to read monitor information after login…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログイン後の情報取得を待っています…"
+          }
+        }
+      }
+    },
+    "Waiting to read monitor information after wake…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to read monitor information after wake…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "復帰後の情報取得を待っています…"
+          }
+        }
+      }
+    },
+    "Waiting to read…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to read…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取得待機中…"
+          }
+        }
+      }
+    },
+    "Waiting to retry monitor information… (%ld/3)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to retry monitor information… (%ld/3)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再取得まで待機しています…（%ld/3）"
+          }
+        }
+      }
     },
     "Weekly": {
       "extractionState": "manual",

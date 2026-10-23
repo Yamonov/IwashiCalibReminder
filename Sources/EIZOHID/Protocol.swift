@@ -154,12 +154,12 @@ func requestHeader(reportID: UInt8, usage: UInt32, counter: UInt16) -> [UInt8] {
 func checkedPayload(response: [UInt8], header: [UInt8], count: Int) throws -> [UInt8] {
     guard response.count >= header.count + count else { throw ProbeError("Truncated monitor response") }
     guard Array(response.prefix(header.count)) == header else {
-        throw ProbeError("Response usage/counter mismatch; another client may be communicating")
+        throw ProbeError("Response usage/counter mismatch; another client may be communicating", kind: .responseMismatch)
     }
     return Array(response[header.count..<(header.count + count)])
 }
 
 func checkStatus(_ response: [UInt8], header: [UInt8]) throws {
     let status = try checkedPayload(response: response, header: header, count: 1)[0]
-    guard status == 0 else { throw ProbeError("Monitor rejected request, status=\(status)") }
+    guard status == 0 else { throw ProbeError("Monitor rejected request, status=\(status)", kind: .requestRejected) }
 }

@@ -81,10 +81,12 @@ extension AcquisitionFailure {
         case .noRegisteredMonitors: L10n.text("No monitors are registered in ColorNavigator")
         case .communication: L10n.text("Unable to communicate with the monitor")
         case .unsupported: L10n.text("This monitor communication format is not supported")
-        case .invalidResponse: L10n.text("Unable to interpret the monitor response")
+        case .invalidResponse, .responseMismatch, .requestRejected: L10n.text("Unable to interpret the monitor response")
         case .databaseUnavailable: L10n.text("Unable to read the ColorNavigator database")
         case .helper: L10n.text("Unable to acquire monitor information")
         case .readerBusy: L10n.text("Another reading is in progress")
+        case .displayAsleep: L10n.text("Reading is paused while the displays are asleep")
+        case .displayStateUnknown: L10n.text("Unable to determine whether the displays are awake")
         }
     }
 }

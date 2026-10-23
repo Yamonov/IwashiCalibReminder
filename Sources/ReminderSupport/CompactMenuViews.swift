@@ -211,11 +211,13 @@ private final class MenuMessageView: NSView {
         label.font = CompactMenuViews.font
         label.textColor = .labelColor
         label.maximumNumberOfLines = maximumLines
-        label.lineBreakMode = .byTruncatingTail
-        let width = min(440, max(180, ceil((text as NSString).size(withAttributes: [.font: CompactMenuViews.font]).width)))
-        let measured = (text as NSString).boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: CompactMenuViews.font])
-        size = NSSize(width: width + 28, height: min(CGFloat(maximumLines) * 19, max(19, ceil(measured.height))) + 6)
+        label.lineBreakMode = .byWordWrapping
+        label.cell?.truncatesLastVisibleLine = true
+        let natural = label.sizeThatFits(NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
+        let width = min(440, max(180, ceil(natural.width)))
+        label.preferredMaxLayoutWidth = width
+        let measured = label.sizeThatFits(NSSize(width: width, height: .greatestFiniteMagnitude))
+        size = NSSize(width: width + 28, height: max(19, ceil(measured.height)) + 6)
         super.init(frame: NSRect(origin: .zero, size: size))
         autoresizingMask = [.width]
         addSubview(label)

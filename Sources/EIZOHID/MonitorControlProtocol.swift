@@ -77,17 +77,19 @@ final class MonitorReader {
     let verbose: Bool
     let refreshID: String?
     private let accessCheck: () -> ColorNavigatorAccessCheck
+    private let powerCheck: () -> AcquisitionFailure?
     private let started = ProcessInfo.processInfo.systemUptime
     var monitor: CNRegisteredMonitor?
     var statistics = MonitorDiscoveryStatistics()
 
     init(device: any MonitorDevice, layout: MonitorControlLayout, verbose: Bool, refreshID: String?,
-         accessCheck: @escaping () -> ColorNavigatorAccessCheck) {
+         accessCheck: @escaping () -> ColorNavigatorAccessCheck, powerCheck: @escaping () -> AcquisitionFailure? = { nil }) {
         self.device = device
         self.layout = layout
         self.verbose = verbose
         self.refreshID = refreshID
         self.accessCheck = accessCheck
+        self.powerCheck = powerCheck
     }
 
     var identity: MonitorIdentity { device.connection.identity(monitor) }
@@ -151,8 +153,8 @@ final class MonitorReader {
             availability = try MonitorModeAvailability.decode(readValue(usage: 0xFF0000F4, count: count))
         } catch {
             let failure = AcquisitionFailure.wrapping(error)
-            if failure.kind == .cnInUse || failure.kind == .cnStateUnknown { throw failure }
-            availability = .unavailable(String(describing: error))
+            if [.cnInUse, .cnStateUnknown, .displayAsleep, .displayStateUnknown].contains(failure.kind) { throw failure }
+            availability = .unavailable(String(describing: error), failure: failure)
             record("monitor.mode_state_failed", fields: ["operation": "enabledModes", "detail": String(describing: error)], level: .error)
         }
         let elapsed = (ProcessInfo.processInfo.systemUptime - started) * 1_000
@@ -166,6 +168,7 @@ final class MonitorReader {
     }
 
     private func get(_ report: MonitorReport) throws -> [UInt8] {
+        if let denial = powerCheck() { throw denial }
         statistics.featureGets += 1
         let bytes = try device.getReport(report)
         guard bytes.count == report.length, bytes.first == report.id else {
@@ -180,6 +183,7 @@ final class MonitorReader {
               bytes.first == report.id, bytes.count == report.length else {
             throw ProbeError("Refusing a report other than descriptor selection or a read request")
         }
+        if let denial = powerCheck() { throw denial }
         if let denial = accessCheck().denial { throw denial }
         statistics.featureSets += 1
         if verbose { FileHandle.standardError.write(Data("REQUEST \(report.id) [\(bytes.count) bytes]\n".utf8)) }

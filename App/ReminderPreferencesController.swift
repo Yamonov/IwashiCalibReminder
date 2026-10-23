@@ -10,11 +10,16 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
     private let preferences: ReminderPreferences
     private let notifier: ReminderNotifier
     private let updater: AppUpdater
+    private let loginItem: LoginItemController
     private let threshold = NSTextField(string: "")
     private let unit = NSPopUpButton(frame: .zero, pullsDown: false)
     private let message = NSTextField(wrappingLabelWithString: "")
+    private let permissionStatus = NSTextField(labelWithString: "")
+    private let permissionAction = NSButton(title: "", target: nil, action: nil)
     private let automaticChecks = NSButton(checkboxWithTitle: L10n.text("Automatically check for updates"), target: nil, action: nil)
     private let checkUpdates = NSButton(title: L10n.text("Check for updates"), target: nil, action: nil)
+    private let launchAtLogin = NSButton(checkboxWithTitle: L10n.text("Launch at login"), target: nil, action: nil)
+    private let loginSettings = NSButton(title: L10n.text("Open System Settings…"), target: nil, action: nil)
     private let unitOptions: [ReminderUnit] = [.days, .hours]
     private var validationMessage: String?
     private var preferredContentWidth: CGFloat = 370
@@ -23,13 +28,18 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
     private let after = NSTextField(labelWithString: L10n.text("remaining"))
     private let separator = NSBox()
     private var notificationHeight: CGFloat = 24
+    private var permissionHeight: CGFloat = 28
+    private var permissionLabelWidth: CGFloat = 0
     private var updatesHeight: CGFloat = 28
+    private var loginHeight: CGFloat = 24
     private var unitWidth: CGFloat = 68
 
-    init(preferences: ReminderPreferences, notifier: ReminderNotifier, updater: AppUpdater) {
+    init(preferences: ReminderPreferences, notifier: ReminderNotifier, updater: AppUpdater,
+         loginItem: LoginItemController) {
         self.preferences = preferences
         self.notifier = notifier
         self.updater = updater
+        self.loginItem = loginItem
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 370, height: 210),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init(window: window)
@@ -59,15 +69,38 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
         unit.setAccessibilityLabel(L10n.text("Unit"))
         message.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         message.textColor = .secondaryLabelColor
+        permissionAction.target = self
+        permissionAction.action = #selector(notificationPermissionAction(_:))
+        permissionAction.bezelStyle = .rounded
         automaticChecks.target = self
         automaticChecks.action = #selector(automaticChecksChanged(_:))
         checkUpdates.target = self
         checkUpdates.action = #selector(checkForUpdates(_:))
         checkUpdates.bezelStyle = .rounded
+        launchAtLogin.target = self
+        launchAtLogin.action = #selector(launchAtLoginChanged(_:))
+        loginSettings.target = self
+        loginSettings.action = #selector(openLoginSettings(_:))
+        loginSettings.bezelStyle = .rounded
     }
 
     private func makeContentView() -> NSView {
-        let controls: [NSControl] = [before, threshold, unit, after, automaticChecks, checkUpdates]
+        let controls: [NSControl] = [before, threshold, unit, after, permissionStatus, permissionAction,
+            launchAtLogin, loginSettings, automaticChecks, checkUpdates]
+        for title in ["Notifications: Checking…", "Notifications: Not requested", "Notifications: Not allowed",
+                      "Notifications: Allowed", "Notifications: Delivered quietly", "Notifications: Unavailable"] {
+            permissionStatus.stringValue = L10n.text(title)
+            permissionStatus.sizeToFit()
+            permissionLabelWidth = max(permissionLabelWidth, permissionStatus.frame.width)
+        }
+        var permissionButtonWidth: CGFloat = 0
+        for title in ["Allow notifications…", "Notification settings…", "Check again"] {
+            permissionAction.title = L10n.text(title)
+            permissionAction.sizeToFit()
+            permissionButtonWidth = max(permissionButtonWidth, permissionAction.frame.width)
+        }
+        permissionStatus.stringValue = notifier.permissionStatusText
+        permissionAction.title = notifier.permissionActionTitle
         controls.forEach { $0.sizeToFit() }
         threshold.setFrameSize(NSSize(width: 64, height: max(22, threshold.frame.height)))
         unitWidth = max(68, ceil(unit.frame.width))
@@ -75,12 +108,17 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
         let notificationWidth = before.frame.width + 64 + unitWidth + after.frame.width + 24
         let updatesWidth = automaticChecks.frame.width + checkUpdates.frame.width + 12
         notificationHeight = max(24, threshold.frame.height, unit.frame.height)
+        permissionHeight = max(28, permissionStatus.frame.height, permissionAction.frame.height)
         updatesHeight = max(28, automaticChecks.frame.height, checkUpdates.frame.height)
-        preferredContentWidth = ceil(max(notificationWidth, updatesWidth) + 40)
-        normalContentHeight = ceil(32 + notificationHeight + 12 + 1 + 12 + updatesHeight)
+        loginHeight = max(24, launchAtLogin.frame.height, loginSettings.frame.height)
+        let loginWidth = launchAtLogin.frame.width + loginSettings.frame.width + 12
+        let permissionWidth = permissionLabelWidth + 12 + permissionButtonWidth
+        preferredContentWidth = ceil(max(notificationWidth, permissionWidth, updatesWidth, loginWidth) + 40)
+        normalContentHeight = ceil(32 + notificationHeight + 8 + permissionHeight + 12 + 1 + 12 + loginHeight + 8 + updatesHeight)
         separator.boxType = .separator
         message.maximumNumberOfLines = 3
-        message.lineBreakMode = .byTruncatingTail
+        message.lineBreakMode = .byWordWrapping
+        message.cell?.truncatesLastVisibleLine = true
         message.preferredMaxLayoutWidth = preferredContentWidth - 40
         message.isHidden = true
         let content = NSView(frame: NSRect(x: 0, y: 0, width: preferredContentWidth, height: normalContentHeight))
@@ -95,10 +133,8 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
         let textHeight: CGFloat
         if message.stringValue.isEmpty { textHeight = 0 }
         else {
-            let bounds = (message.stringValue as NSString).boundingRect(
-                with: NSSize(width: preferredContentWidth - 40, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: message.font ?? NSFont.systemFont(ofSize: 11)])
-            textHeight = min(51, max(17, ceil(bounds.height)))
+            let measured = message.sizeThatFits(NSSize(width: preferredContentWidth - 40, height: .greatestFiniteMagnitude))
+            textHeight = max(17, ceil(measured.height))
         }
         let height = normalContentHeight + (textHeight > 0 ? textHeight + 10 : 0)
         window?.setContentSize(NSSize(width: preferredContentWidth, height: height))
@@ -108,8 +144,17 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
             control.setFrameOrigin(NSPoint(x: x, y: topRowY + (notificationHeight - control.frame.height) / 2))
             x += control.frame.width + 8
         }
-        separator.frame = NSRect(x: 20, y: topRowY - 13, width: preferredContentWidth - 40, height: 1)
-        let updatesY = topRowY - 25 - updatesHeight
+        let permissionY = topRowY - 8 - permissionHeight
+        permissionStatus.frame = NSRect(x: 20, y: permissionY + (permissionHeight - permissionStatus.frame.height) / 2,
+            width: permissionLabelWidth, height: permissionStatus.frame.height)
+        permissionAction.setFrameOrigin(NSPoint(x: 32 + permissionLabelWidth,
+            y: permissionY + (permissionHeight - permissionAction.frame.height) / 2))
+        separator.frame = NSRect(x: 20, y: permissionY - 13, width: preferredContentWidth - 40, height: 1)
+        let loginY = permissionY - 25 - loginHeight
+        launchAtLogin.setFrameOrigin(NSPoint(x: 20, y: loginY + (loginHeight - launchAtLogin.frame.height) / 2))
+        loginSettings.setFrameOrigin(NSPoint(x: 32 + launchAtLogin.frame.width,
+            y: loginY + (loginHeight - loginSettings.frame.height) / 2))
+        let updatesY = loginY - 8 - updatesHeight
         automaticChecks.setFrameOrigin(NSPoint(x: 20, y: updatesY + (updatesHeight - automaticChecks.frame.height) / 2))
         checkUpdates.setFrameOrigin(NSPoint(x: 32 + automaticChecks.frame.width,
             y: updatesY + (updatesHeight - checkUpdates.frame.height) / 2))
@@ -119,8 +164,14 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
 
     private func observeChanges() {
         withObservationTracking {
-            _ = notifier.notice
+            _ = notifier.settingsNotice
             _ = updater.startupFailure
+            permissionStatus.stringValue = notifier.permissionStatusText
+            permissionAction.title = notifier.permissionActionTitle
+            permissionAction.isEnabled = !notifier.isBusy
+            permissionAction.sizeToFit()
+            launchAtLogin.state = loginItem.isEnabled ? .on : .off
+            loginSettings.isHidden = !loginItem.requiresApproval
             automaticChecks.state = updater.automaticallyChecksForUpdates ? .on : .off
             automaticChecks.isEnabled = updater.isAvailable
             checkUpdates.isEnabled = updater.canCheckForUpdates
@@ -131,7 +182,7 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
     }
 
     private func updateMessage() {
-        message.stringValue = validationMessage ?? updater.startupFailure ?? notifier.notice ?? ""
+        message.stringValue = validationMessage ?? loginItem.notice ?? updater.startupFailure ?? notifier.settingsNotice ?? ""
         message.isHidden = message.stringValue.isEmpty
         resizeToContent()
     }
@@ -141,6 +192,14 @@ final class ReminderPreferencesController: NSWindowController, NSWindowDelegate,
     }
 
     @objc private func checkForUpdates(_ sender: NSButton) { updater.checkForUpdates() }
+    @objc private func notificationPermissionAction(_ sender: NSButton) { notifier.performPermissionAction() }
+    @objc private func launchAtLoginChanged(_ sender: NSButton) { loginItem.setEnabled(sender.state == .on) }
+    @objc private func openLoginSettings(_ sender: NSButton) { loginItem.openSettings() }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        loginItem.refresh()
+        notifier.checkAuthorization()
+    }
 
     func controlTextDidChange(_ notification: Notification) { saveThreshold() }
     @objc private func unitChanged(_ sender: NSPopUpButton) { saveThreshold() }

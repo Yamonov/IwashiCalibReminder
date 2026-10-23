@@ -31,6 +31,7 @@ public struct AcquisitionFailure: Error, Codable, Sendable, LocalizedError {
     public enum Kind: String, Codable, Sendable {
         case cnInUse, cnStateUnknown, notFound, noRegisteredMonitors, communication, unsupported, invalidResponse
         case databaseUnavailable, helper, readerBusy
+        case displayAsleep, displayStateUnknown, responseMismatch, requestRejected
     }
 
     public let kind: Kind
@@ -49,8 +50,18 @@ public struct AcquisitionFailure: Error, Codable, Sendable, LocalizedError {
 
     public var diagnosticLevel: DiagnosticEvent.Level {
         switch kind {
-        case .cnInUse, .notFound, .noRegisteredMonitors, .readerBusy: .notice
+        case .cnInUse, .notFound, .noRegisteredMonitors, .readerBusy, .displayAsleep: .notice
         default: .error
+        }
+    }
+
+    /// Only a bounded wake/login recovery may retry these failures.
+    public var permitsRecoveryRetry: Bool {
+        switch kind {
+        case .communication, .responseMismatch, .requestRejected, .notFound,
+             .readerBusy, .cnInUse, .cnStateUnknown, .displayStateUnknown: true
+        case .displayAsleep, .noRegisteredMonitors, .unsupported, .invalidResponse,
+             .databaseUnavailable, .helper: false
         }
     }
 
@@ -97,6 +108,12 @@ public struct MonitorRefreshResult: Codable, Sendable {
     public let globalFailures: [AcquisitionFailure]
     public let discovery: MonitorDiscoveryStatistics?
     public let registeredMonitors: [CNRegisteredMonitor]?
+
+    public var needsRecoveryRetry: Bool {
+        globalFailures.contains(where: \.permitsRecoveryRetry)
+            || failures.contains { $0.failure.permitsRecoveryRetry }
+            || reports.contains { $0.monitor.modeAvailability?.failure?.permitsRecoveryRetry == true }
+    }
 
     public init(reports: [MonitorUsageReport] = [], failures: [MonitorReadFailure] = [],
                 globalFailures: [AcquisitionFailure] = [], discovery: MonitorDiscoveryStatistics? = nil,

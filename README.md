@@ -2,13 +2,13 @@
 
 <img src="App/Assets.xcassets/AppIcon.appiconset/icon-iOS-Default-1024@1x.png" width="96" height="96" alt="IwashiCalibReminder icon">
 
-EIZO ColorEdgeの次回キャリブレーションまでの残り時間を表示する、macOSのメニューバーアプリです。バージョン **1.0**。英語・日本語に対応します。
+EIZO ColorEdgeの次回キャリブレーションまでの残り時間を表示する、macOSのメニューバーアプリです。バージョン **1.0.5**。英語・日本語に対応します。
 
 A macOS menu bar app that shows the time remaining until the next calibration of a registered EIZO ColorEdge monitor. English and Japanese are supported.
 
 ## ダウンロード
 
-[1.0のリリース](https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.0)からZIPをダウンロードし、展開した`IwashiCalibReminder.app`を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
+[1.0.5のリリース](https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.0.5)からZIPをダウンロードし、展開した`IwashiCalibReminder.app`を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
 
 ## 対応環境と表示
 
@@ -21,9 +21,13 @@ A macOS menu bar app that shows the time remaining until the next calibration of
 - 取得失敗時は、再利用できる前回情報を薄く表示し、最終取得成功日時を添えます。設定変更や使用時間の逆行を確認した場合は古い値を使いません。
 - 残り時間が指定した日数・時間以下になると通知します。1日は24時間として換算し、同じ調整記録への通知は繰り返しません。
 
+## 環境設定
+
+通知する残り時間を日／時間で指定し、「ログイン時に起動」を設定できます。起動時にmacOSの通知権限を確認し、まだ未回答の場合だけ標準の許可画面を求めます。ログイン起動・スリープ中の起動では初回待機後に求めます。拒否済みには繰り返し要求せず、環境設定に状態と通知設定へのボタンを表示します。
+
 ## 通信と更新
 
-取得は起動時、1時間ごと、手動更新、スリープ復帰後に行います。メニューを開くだけでは問い合わせず、失敗直後の自動再試行も行いません。ColorNavigatorの通常画面が開いている場合は取得を見送ります。Agentのみの場合は取得できますが、Agentとの完全な排他制御を保証する方式ではありません。
+取得は通常起動時、処理終了から1時間ごと、手動更新、スリープ復帰後に行います。Mac・モニターのスリープ中は停止し、復帰後は15秒、ログイン起動後は30秒待ちます。復帰・ログイン時の一時的な失敗は10秒・30秒・60秒の間隔で最大3回再試行します。メニューを開くだけでは問い合わせません。ColorNavigatorの通常画面が開いている場合は取得を見送ります。Agentのみの場合は取得できますが、Agentとの完全な排他制御を保証する方式ではありません。
 
 CNのDBはSwiftで読み取り、モニター設定や元のDBは変更しません。情報不足を推測で補完せず、取得用CLIは必要なときだけ起動します。
 

@@ -16,9 +16,8 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandar
     @ObservationIgnored private var started = false
     @ObservationIgnored private let logger = Logger(subsystem: "com.iwashiya.IwashiCalibReminder", category: "Updater")
 
-    init(isDemo: Bool = false) {
+    override init() {
         super.init()
-        guard !isDemo else { return }
         let controller = SPUStandardUpdaterController(startingUpdater: false,
             updaterDelegate: self, userDriverDelegate: self)
         self.controller = controller
@@ -55,13 +54,14 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandar
     }
 
     func checkForUpdates() {
+        start()
         guard canCheckForUpdates else { return }
         controller?.checkForUpdates(nil)
     }
 
     private func synchronizeSettings() {
         automaticallyChecksForUpdates = controller?.updater.automaticallyChecksForUpdates ?? false
-        canCheckForUpdates = startupFailure == nil && (controller?.updater.canCheckForUpdates ?? false)
+        canCheckForUpdates = isAvailable && (!started || (controller?.updater.canCheckForUpdates ?? false))
     }
 
     // Sparkle's standard user driver delivers these callbacks on the main thread.

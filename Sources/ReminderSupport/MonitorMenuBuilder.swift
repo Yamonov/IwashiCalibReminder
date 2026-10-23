@@ -54,8 +54,9 @@ public final class MonitorMenuBuilder {
             }
             if let information = group.information {
                 let common = NSMenuItem(title: L10n.text("Common settings"), action: nil, keyEquivalent: "")
+                let settings = information.commonSettings
+                let dimmed = group.isShowingPrevious
                 common.submenu = deferredMenu { menu in
-                    let settings = information.commonSettings
                     let entries: [(String, Bool?)] = [
                         (L10n.text("Check monitor resolution at startup"), settings?.checkResolution),
                         (L10n.text("Do not apply ICC profiles"), settings?.appliesICCProfile.map { !$0 }),
@@ -63,7 +64,7 @@ public final class MonitorMenuBuilder {
                         (L10n.text("Monitor video card gamma and keep it linear"), settings?.checkVideoCardGammaChangeToMakeItLinear)
                     ]
                     for (label, value) in entries {
-                        menu.addItem(CompactMenuViews.checkmark(label, isOn: value, dimmed: group.isShowingPrevious))
+                        menu.addItem(CompactMenuViews.checkmark(label, isOn: value, dimmed: dimmed))
                     }
                 }
                 menu.addItem(common)

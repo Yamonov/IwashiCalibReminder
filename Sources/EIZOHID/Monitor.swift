@@ -49,7 +49,7 @@ public enum MonitorProbe {
             }
         var cache = store.load()
         var result = MonitorDiscovery.read(devices: devices, registered: registeredMonitors, cache: &cache,
-            format: format, verbose: verbose, refreshID: refreshID)
+            format: format, verbose: verbose, refreshID: refreshID, powerCheck: { DisplayPowerState.current().denial })
         store.save(cache)
         if result.readings.isEmpty && result.failures.isEmpty && result.globalFailures.isEmpty {
             result.globalFailures.append(AcquisitionFailure(.notFound,
@@ -72,6 +72,7 @@ public enum MonitorProbe {
     }
 
     public static func checkAccess() throws {
+        if let denial = DisplayPowerState.current().denial { throw denial }
         if let denial = ColorNavigatorAccess.check().denial { throw denial }
     }
 }
