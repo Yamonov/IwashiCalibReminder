@@ -41,8 +41,18 @@ enum CompactMenuViews {
         return item
     }
 
-    static func modeRow(_ row: ReminderMenuRow, dimmed: Bool, showsSubmenu: Bool) -> NSView {
-        ModeMenuRowView(row: row, dimmed: dimmed, showsSubmenu: showsSubmenu)
+    static func standardHeader(remaining: String?, dimmed: Bool) -> NSMenuItem {
+        let title = remaining.map { "[STD] " + $0 } ?? "[STD]"
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.view = StandardModeHeaderView(remaining: remaining ?? "", accessibilityLabel: title, dimmed: dimmed)
+        return item
+    }
+
+    static func modeRow(name: String, badge: String?, remaining: String?, isCurrentMode: Bool,
+                        dimmed: Bool, showsSubmenu: Bool) -> NSView {
+        ModeMenuRowView(name: name, badge: badge, remaining: remaining, isCurrentMode: isCurrentMode,
+            dimmed: dimmed, showsSubmenu: showsSubmenu)
     }
 
     static func highlight(_ item: NSMenuItem, selected: Bool) {
@@ -144,32 +154,108 @@ private final class MenuValueView: NSView {
     override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); updateColors() }
 }
 
+private enum ModeRowLayout {
+    static let badgeFrame = NSRect(x: 30, y: 4, width: 32, height: 15)
+    static let titleX: CGFloat = 68
+
+    static func standardBackground(in appearance: NSAppearance, isHeader: Bool) -> NSColor {
+        switch appearance.bestMatch(from: [.accessibilityHighContrastDarkAqua, .darkAqua, .accessibilityHighContrastAqua, .aqua]) {
+        case .accessibilityHighContrastDarkAqua: .white.withAlphaComponent(isHeader ? 0.24 : 0.10)
+        case .darkAqua: .white.withAlphaComponent(isHeader ? 0.16 : 0.06)
+        case .accessibilityHighContrastAqua: .black.withAlphaComponent(isHeader ? 0.20 : 0.08)
+        default: .black.withAlphaComponent(isHeader ? 0.12 : 0.04)
+        }
+    }
+}
+
+@MainActor
+private final class StandardModeHeaderView: NSView {
+    private let icon = NSImageView()
+    private let title: NSTextField
+    private let dimmed: Bool
+    private let preferredWidth: CGFloat
+
+    init(remaining: String, accessibilityLabel: String, dimmed: Bool) {
+        title = NSTextField(labelWithString: remaining)
+        title.font = CompactMenuViews.font
+        title.lineBreakMode = .byTruncatingTail
+        self.dimmed = dimmed
+        preferredWidth = ceil(ModeRowLayout.titleX + title.fittingSize.width + 14)
+        super.init(frame: NSRect(x: 0, y: 0, width: preferredWidth, height: 24))
+        autoresizingMask = [.width]
+        addSubview(icon)
+        addSubview(title)
+        updateColors()
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(accessibilityLabel)
+    }
+
+    required init?(coder: NSCoder) { nil }
+    override var intrinsicContentSize: NSSize { NSSize(width: preferredWidth, height: 24) }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        icon.frame = ModeRowLayout.badgeFrame
+        title.frame = NSRect(x: ModeRowLayout.titleX, y: 3, width: max(0, bounds.width - ModeRowLayout.titleX - 14), height: 18)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        ModeRowLayout.standardBackground(in: effectiveAppearance, isHeader: true).setFill()
+        bounds.fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+        needsDisplay = true
+    }
+
+    private func updateColors() {
+        icon.image = CompactMenuViews.badge("STD", dimmed: dimmed)
+        title.textColor = dimmed ? .disabledControlTextColor : .labelColor
+    }
+}
+
 @MainActor
 private final class ModeMenuRowView: NSView {
-    private let icon: NSImageView
+    private let currentModeDot: NSImageView?
+    private let icon: NSImageView?
     private let name: NSTextField
-    private let time: NSTextField
+    private let time: NSTextField?
     private let arrow: NSImageView
     private let dimmed: Bool
     private let naturalWidth: CGFloat
     private let timeWidth: CGFloat
-    private let badgeText: String
+    private let badgeText: String?
     var isSelected = false { didSet { updateColors(); needsDisplay = true } }
 
-    init(row: ReminderMenuRow, dimmed: Bool, showsSubmenu: Bool) {
-        icon = NSImageView(image: CompactMenuViews.badge(row.badge, dimmed: dimmed))
-        name = NSTextField(labelWithString: row.modeName)
-        time = NSTextField(labelWithString: row.remainingMinutes == nil ? "" : row.remainingText)
+    init(name: String, badge: String?, remaining: String?, isCurrentMode: Bool, dimmed: Bool, showsSubmenu: Bool) {
+        currentModeDot = isCurrentMode ? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)
+            .map(NSImageView.init(image:)) : nil
+        icon = badge.map { _ in NSImageView() }
+        self.name = NSTextField(labelWithString: name)
+        time = remaining.map(NSTextField.init(labelWithString:))
         arrow = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage())
         self.dimmed = dimmed
-        badgeText = row.badge
-        name.font = CompactMenuViews.font; time.font = CompactMenuViews.font
-        time.alignment = .right
-        timeWidth = ceil(time.fittingSize.width)
-        naturalWidth = ceil(52 + name.fittingSize.width + (timeWidth > 0 ? 12 + timeWidth : 0) + 34)
+        badgeText = badge
+        self.name.font = CompactMenuViews.font
+        time?.font = CompactMenuViews.font
+        time?.alignment = .right
+        timeWidth = ceil(time?.fittingSize.width ?? 0)
+        naturalWidth = ceil(ModeRowLayout.titleX + self.name.fittingSize.width + (timeWidth > 0 ? 12 + timeWidth : 0) + 34)
         super.init(frame: NSRect(x: 0, y: 0, width: naturalWidth, height: 24))
         autoresizingMask = [.width]
-        [icon, name, time, arrow].forEach(addSubview)
+        if let currentModeDot {
+            currentModeDot.identifier = NSUserInterfaceItemIdentifier("currentModeDot")
+            currentModeDot.contentTintColor = .systemBlue
+            addSubview(currentModeDot)
+        }
+        if let icon { addSubview(icon) }
+        addSubview(self.name)
+        if let time { addSubview(time) }
+        addSubview(arrow)
         arrow.isHidden = !showsSubmenu
         updateColors()
         // The NSMenuItem owns selection, submenu tracking and accessibility.
@@ -182,24 +268,37 @@ private final class ModeMenuRowView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func layout() {
         super.layout()
-        icon.frame = NSRect(x: 14, y: 4, width: 32, height: 15)
+        currentModeDot?.frame = NSRect(x: 14, y: 8, width: 8, height: 8)
+        icon?.frame = ModeRowLayout.badgeFrame
         let timeStart = bounds.width - 34 - timeWidth
-        name.frame = NSRect(x: 52, y: 3, width: max(0, (timeWidth > 0 ? timeStart - 12 : bounds.width - 34) - 52), height: 18)
-        time.frame = NSRect(x: timeStart, y: 3, width: timeWidth, height: 18)
+        let titleEnd = timeWidth > 0 ? timeStart - 12 : bounds.width - 34
+        name.frame = NSRect(x: ModeRowLayout.titleX, y: 3, width: max(0, titleEnd - ModeRowLayout.titleX), height: 18)
+        time?.frame = NSRect(x: timeStart, y: 3, width: timeWidth, height: 18)
         arrow.frame = NSRect(x: bounds.width - 22, y: 7, width: 8, height: 10)
     }
     override func draw(_ dirtyRect: NSRect) {
         if isSelected && !dimmed {
             NSColor.selectedContentBackgroundColor.setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 1), xRadius: 5, yRadius: 5).fill()
+            if let currentModeDot {
+                NSColor.selectedMenuItemTextColor.setFill()
+                NSBezierPath(ovalIn: currentModeDot.frame.insetBy(dx: -1, dy: -1)).fill()
+            }
+        } else if badgeText == nil {
+            ModeRowLayout.standardBackground(in: effectiveAppearance, isHeader: false).setFill()
+            bounds.fill()
         }
     }
     private func updateColors() {
         let color: NSColor = dimmed ? .disabledControlTextColor : isSelected ? .selectedMenuItemTextColor : .labelColor
-        name.textColor = color; time.textColor = color; arrow.contentTintColor = color
-        icon.image = CompactMenuViews.badge(badgeText, dimmed: dimmed, selected: isSelected)
+        name.textColor = color; time?.textColor = color; arrow.contentTintColor = color
+        if let badgeText { icon?.image = CompactMenuViews.badge(badgeText, dimmed: dimmed, selected: isSelected) }
     }
-    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); updateColors() }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+        needsDisplay = true
+    }
 }
 
 @MainActor

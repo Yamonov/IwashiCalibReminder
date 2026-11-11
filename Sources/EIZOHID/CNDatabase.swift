@@ -100,7 +100,7 @@ public enum CNDatabase {
     public static let defaultPath = "/Library/Application Support/EIZO/ColorNavigator 7/db.0"
 
     /// Reads original files through Foundation only. No temporary DB, LevelDB library, or CLI.
-    public static func read(path: String = defaultPath, details: CNHistoryDetail = .menu) -> CNDatabaseContents {
+    public static func read(path: String = defaultPath, details: CNHistoryDetail = .menu, registrationsOnly: Bool = false) -> CNDatabaseContents {
         let source = URL(fileURLWithPath: path).standardizedFileURL
         do {
             do {
@@ -108,7 +108,8 @@ public enum CNDatabase {
             } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
                 return CNDatabaseContents(sourcePath: source.path, status: "databaseNotFound")
             }
-            let values = try LevelDBDirectReader.read(directory: source)
+            let prefix = registrationsOnly ? Data("MonitorInformation:".utf8) : nil
+            let values = try LevelDBDirectReader.read(directory: source, keyPrefix: prefix)
             var records: [String: Data] = [:]
             let prefixes = ["MonitorInformation:", "Target_", "CalibrationResult_", "StandardModeCalibrationResult_"]
             for (keyData, value) in values {

@@ -86,6 +86,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let data = ReminderMenuData(monitors: model.monitors)
         menuBuilder.appendGroups(to: menu, data: data)
         separator()
+        menuBuilder.appendCommonSettings(to: menu, data: data)
         let refresh = action(L10n.text("Refresh information"), selector: #selector(refreshInformation(_:)))
         refresh.isEnabled = model.canRefresh
         separator()

@@ -15,6 +15,8 @@ public struct MonitorReading: Codable, Sendable {
     public let readAt: String
     public let elapsedMilliseconds: Double
     public var modeAvailability: MonitorModeAvailability?
+    public var selectedModeNumber: Int?
+    public var supportsSelectedMode: Bool?
     public var registryID: String?
 }
 
@@ -29,7 +31,8 @@ public enum MonitorProbe {
     }
 
     public static func readResult(registeredMonitors: [CNRegisteredMonitor], format: String = "auto",
-                                  verbose: Bool = false, refreshID: String? = nil) throws -> MonitorProbeResult {
+                                  verbose: Bool = false, refreshID: String? = nil,
+                                  selectedModesOnly: Bool = false) throws -> MonitorProbeResult {
         try checkAccess()
         guard !registeredMonitors.isEmpty else {
             throw AcquisitionFailure(.noRegisteredMonitors, detail: "No monitors are registered in the ColorNavigator database", operation: "readRegistrations")
@@ -49,9 +52,10 @@ public enum MonitorProbe {
             }
         var cache = store.load()
         var result = MonitorDiscovery.read(devices: devices, registered: registeredMonitors, cache: &cache,
-            format: format, verbose: verbose, refreshID: refreshID, powerCheck: { DisplayPowerState.current().denial })
-        store.save(cache)
-        if result.readings.isEmpty && result.failures.isEmpty && result.globalFailures.isEmpty {
+            format: format, verbose: verbose, refreshID: refreshID, selectedModesOnly: selectedModesOnly, powerCheck: { DisplayPowerState.current().denial })
+        if !selectedModesOnly { store.save(cache) }
+        let found = selectedModesOnly ? result.discovery.matchedDevices > 0 : !result.readings.isEmpty
+        if !found && result.failures.isEmpty && result.globalFailures.isEmpty {
             result.globalFailures.append(AcquisitionFailure(.notFound,
                 detail: "No connected monitor matches the ColorNavigator database", operation: "discoverMonitors"))
         }

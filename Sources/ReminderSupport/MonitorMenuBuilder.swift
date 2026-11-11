@@ -52,28 +52,30 @@ public final class MonitorMenuBuilder {
             } else if group.isStale, group.rows.isEmpty, group.lastSuccessAt == nil {
                 menu.addItem(ReadableMenuInformation.item(L10n.text("No previous reading")))
             }
-            if let information = group.information {
-                let common = NSMenuItem(title: L10n.text("Common settings"), action: nil, keyEquivalent: "")
-                let settings = information.commonSettings
-                let dimmed = group.isShowingPrevious
-                common.submenu = deferredMenu { menu in
-                    let entries: [(String, Bool?)] = [
-                        (L10n.text("Check monitor resolution at startup"), settings?.checkResolution),
-                        (L10n.text("Do not apply ICC profiles"), settings?.appliesICCProfile.map { !$0 }),
-                        (L10n.text("Monitor display and input signal settings"), settings?.checkSignalInfoWarning),
-                        (L10n.text("Monitor video card gamma and keep it linear"), settings?.checkVideoCardGammaChangeToMakeItLinear)
-                    ]
-                    for (label, value) in entries {
-                        menu.addItem(CompactMenuViews.checkmark(label, isOn: value, dimmed: dimmed))
-                    }
-                }
-                menu.addItem(common)
+            let selectedModeNumber = group.isShowingPrevious ? nil : group.report?.monitor.selectedModeNumber
+            if let selectedModeNumber, !group.rows.contains(where: { $0.modeNumber == selectedModeNumber }) {
+                menu.addItem(ReadableMenuInformation.item(L10n.text("Current mode: %ld", selectedModeNumber)))
             }
             if !group.rows.isEmpty { menu.addItem(.separator()) }
-            for row in group.rows {
-                let item = NSMenuItem(title: "[\(row.badge)]" + row.modeName, action: nil, keyEquivalent: "")
+            let standardRows = group.rows.filter { $0.badge == "STD" }
+            if let standard = standardRows.first {
+                let remaining: String?
+                if let minutes = standard.remainingMinutes {
+                    remaining = minutes < 0 ? standard.remainingText : L10n.text("Remaining: %@", standard.remainingText)
+                } else {
+                    remaining = group.information?.policy?.type == "None" ? nil : L10n.text("Remaining —")
+                }
+                menu.addItem(CompactMenuViews.standardHeader(remaining: remaining, dimmed: group.isShowingPrevious))
+            }
+            for row in standardRows + group.rows.filter({ $0.badge != "STD" }) {
+                let showsSummary = row.badge != "STD"
+                let isSelectedMode = row.modeNumber == selectedModeNumber
+                let title = showsSummary ? "[\(row.badge)]" + row.modeName : row.modeName
+                let remaining = showsSummary && row.remainingMinutes != nil ? row.remainingText : nil
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                 item.representedObject = row.id
-                item.setAccessibilityLabel("[\(row.badge)]" + row.modeName + (row.remainingMinutes == nil ? "" : " " + row.remainingText))
+                let label = remaining.map { title + " " + $0 } ?? title
+                item.setAccessibilityLabel(isSelectedMode ? L10n.text("%@ (current mode)", label) : label)
                 item.isEnabled = !group.isShowingPrevious
                 if !group.isShowingPrevious, let report = group.report,
                    let mode = report.calibrationHistory.colorModes.first(where: { $0.modeNumber == row.modeNumber }) {
@@ -81,11 +83,34 @@ public final class MonitorMenuBuilder {
                         self?.populate(menu, with: ModeMenuPresentation(report: report, mode: mode))
                     }
                 }
-                item.view = CompactMenuViews.modeRow(row, dimmed: group.isShowingPrevious, showsSubmenu: item.hasSubmenu)
+                item.view = CompactMenuViews.modeRow(name: row.modeName, badge: showsSummary ? row.badge : nil,
+                    remaining: remaining, isCurrentMode: isSelectedMode, dimmed: group.isShowingPrevious, showsSubmenu: item.hasSubmenu)
                 modeItems.append(item)
                 menu.addItem(item)
             }
         }
+    }
+
+    public func appendCommonSettings(to menu: NSMenu, data: ReminderMenuData) {
+        let current = data.groups.lazy.compactMap { $0.report?.calibrationHistory.commonSettings }.first
+        let previous = data.groups
+            .filter { $0.isShowingPrevious && $0.information?.commonSettings != nil }
+            .max { ($0.lastSuccessAt ?? .distantPast) < ($1.lastSuccessAt ?? .distantPast) }
+        let settings = current ?? previous?.information?.commonSettings
+        let dimmed = current == nil && previous != nil
+        let common = NSMenuItem(title: L10n.text("Common settings"), action: nil, keyEquivalent: "")
+        common.submenu = deferredMenu { menu in
+            let entries: [(String, Bool?)] = [
+                (L10n.text("Check monitor resolution at startup"), settings?.checkResolution),
+                (L10n.text("Do not apply ICC profiles"), settings?.appliesICCProfile.map { !$0 }),
+                (L10n.text("Monitor display and input signal settings"), settings?.checkSignalInfoWarning),
+                (L10n.text("Monitor video card gamma and keep it linear"), settings?.checkVideoCardGammaChangeToMakeItLinear)
+            ]
+            for (label, value) in entries {
+                menu.addItem(CompactMenuViews.checkmark(label, isOn: value, dimmed: dimmed))
+            }
+        }
+        menu.addItem(common)
     }
 
     public func highlight(_ item: NSMenuItem?) {

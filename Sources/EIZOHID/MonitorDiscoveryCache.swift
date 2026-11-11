@@ -75,7 +75,8 @@ struct MonitorDiscoveryCacheStore {
         let bootSessionID: String
         let entries: [MonitorDiscoveryEntry]
     }
-    private static let schemaVersion = 1
+    // Rediscover descriptors cached before selected-mode support was recorded.
+    private static let schemaVersion = 2
     private static let maximumBytes = 262_144
     private static let maximumEntries = 64
     let url: URL

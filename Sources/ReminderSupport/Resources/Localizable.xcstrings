@@ -109,6 +109,24 @@
       },
       "generatesSymbol": false
     },
+    "%@ (current mode)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (current mode)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@（選択中）"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
     "%@ overdue": {
       "extractionState": "manual",
       "localizations": {
@@ -823,6 +841,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "パスをコピー"
+          }
+        }
+      },
+      "generatesSymbol": false
+    },
+    "Current mode: %ld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current mode: %ld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択中のモード：%ld番"
           }
         }
       },

@@ -52,6 +52,17 @@ public struct HelperClient: Sendable {
         } catch { throw HelperError.invalidOutput }
     }
 
+    @concurrent
+    public func readSelectedModes(_ targets: Set<CNRegisteredMonitor>, refreshID: String) async throws -> SelectedModeSnapshot {
+        let identities = String(decoding: try JSONEncoder().encode(targets), as: UTF8.self)
+        let result = try await HelperCommand(executableURL: executableURL,
+            arguments: ["--selected-modes", identities, "--refresh-id", refreshID],
+            diagnostics: .shared, refreshID: refreshID).run()
+        try validate(result)
+        do { return try JSONDecoder().decode(SelectedModeSnapshot.self, from: result.stdout) }
+        catch { throw HelperError.invalidOutput }
+    }
+
     private func validate(_ result: HelperResult) throws {
         guard result.reason == .exit, result.status == 0 else {
             if result.reason == .uncaughtSignal && result.status == SIGALRM { throw HelperError.timedOut }

@@ -4,10 +4,13 @@ enum MonitorDiscovery {
     /// Called once for an explicit update. No polling, retries, or persistent HID handles.
     static func read(devices: [any MonitorDevice], registered: [CNRegisteredMonitor],
                      cache: inout MonitorDiscoveryCache, format: String = "auto", verbose: Bool = false,
-                     refreshID: String? = nil, accessCheck: @escaping () -> ColorNavigatorAccessCheck = ColorNavigatorAccess.check,
+                     refreshID: String? = nil, selectedModesOnly: Bool = false,
+                     accessCheck: @escaping () -> ColorNavigatorAccessCheck = ColorNavigatorAccess.check,
                      powerCheck: @escaping () -> AcquisitionFailure? = { nil }) -> MonitorProbeResult {
         var result = MonitorProbeResult()
         result.discovery.enumeratedDevices = devices.count
+        let registryIDs = devices.compactMap { $0.connection.registryID }
+        if registryIDs.count == devices.count { result.discovery.connectedRegistryIDs = registryIDs }
         result.discovery.registeredMonitors = registered.count
         cache.retain(devices.map(\.connection))
         let allowed = Set(registered)
@@ -15,6 +18,8 @@ enum MonitorDiscovery {
         var matched: Set<CNRegisteredMonitor> = []
         for device in devices {
             let cached = cache.entry(for: device.connection)
+            // A profile notification can only target a monitor identified by a full read.
+            if selectedModesOnly, cached?.capabilities == nil { continue }
             if let cached {
                 result.discovery.cacheHits += 1
                 if !allowed.contains(cached.monitor) || matched.contains(cached.monitor) { continue }
@@ -46,7 +51,12 @@ enum MonitorDiscovery {
                 session.record("monitor.read_started", fields: ["cacheHit": String(cached?.capabilities != nil)])
                 let capabilities = try cached?.capabilities ?? session.discoverCapabilities()
                 cache.update(connection: device.connection, monitor: monitor, capabilities: capabilities)
-                result.readings.append(try session.read(capabilities: capabilities, format: format))
+                if selectedModesOnly {
+                    result.selectedModes[monitor.id] = try session.readSelectedMode(capabilities: capabilities,
+                        modeCount: try? capabilities.modeByteCount())
+                } else {
+                    result.readings.append(try session.read(capabilities: capabilities, format: format))
+                }
             } catch {
                 let failure = AcquisitionFailure.wrapping(error)
                 if [.cnInUse, .cnStateUnknown, .displayAsleep, .displayStateUnknown].contains(failure.kind) {

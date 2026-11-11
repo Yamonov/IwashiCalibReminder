@@ -38,7 +38,7 @@ public struct MonitorGraphValue: Sendable {
 
 public struct MonitorDisplayState: Sendable, Identifiable {
     public let identity: MonitorIdentity
-    public let report: MonitorUsageReport?
+    public internal(set) var report: MonitorUsageReport?
     public let graphValue: MonitorGraphValue?
     public let isStale: Bool
     public let message: String?

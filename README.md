@@ -2,13 +2,13 @@
 
 <img src="App/Assets.xcassets/AppIcon.appiconset/icon-iOS-Default-1024@1x.png" width="96" height="96" alt="IwashiCalibReminder icon">
 
-EIZO ColorEdgeの次回キャリブレーションまでの残り時間を表示する、macOSのメニューバーアプリです。バージョン **1.0.5**。英語・日本語に対応します。
+EIZO ColorEdgeの次回キャリブレーションまでの残り時間を表示する、macOSのメニューバーアプリです。バージョン **1.1**。英語・日本語に対応します。
 
 A macOS menu bar app that shows the time remaining until the next calibration of a registered EIZO ColorEdge monitor. English and Japanese are supported.
 
 ## ダウンロード
 
-[1.0.5のリリース](https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.0.5)からZIPをダウンロードし、展開した`IwashiCalibReminder.app`を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
+[1.1のリリース](https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.1)からZIPをダウンロードし、展開した`IwashiCalibReminder.app`を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
 
 ## 対応環境と表示
 
@@ -17,7 +17,7 @@ A macOS menu bar app that shows the time remaining until the next calibration of
 - 使用時間方式と日付方式に対応します。使用時間方式は、現在の累積値と前回調整時の累積値の差から計算します。予想日時には調整後の平均稼働率を使います。
 - 日付方式は、前回調整後の最初の予定を期限に固定し、超過しても先送りしません。Daily、Weekly、Monthly、Quarterly、SemiAnnual、Annualを扱います。SelfCorrectionと定期検証は対象外です。
 - メニューバーのグラフは最短の残り時間に応じて緑・黄・赤へ変わります。100時間未満は整数時間、超過時はNGを表示します。複数モニターは左右に分けて表示します。
-- メニューにはモニター情報のカード、有効モードの設定と測定値、ICCファイル名、パスのコピー・Finder表示を用意しています。
+- メニューにはモニター情報のカード、有効モードの設定と測定値、ICCファイル名、パスのコピー・Finder表示を用意しています。選択中のモードには青い丸を表示し、メニューからはモードを切り替えられません。
 - 取得失敗時は、再利用できる前回情報を薄く表示し、最終取得成功日時を添えます。設定変更や使用時間の逆行を確認した場合は古い値を使いません。
 - 残り時間が指定した日数・時間以下になると通知します。1日は24時間として換算し、同じ調整記録への通知は繰り返しません。
 

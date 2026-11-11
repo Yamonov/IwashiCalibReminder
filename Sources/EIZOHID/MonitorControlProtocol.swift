@@ -34,15 +34,18 @@ struct MonitorControlLayout: Sendable {
 }
 
 struct MonitorCapabilities: Codable, Equatable, Sendable {
+    static let selectedModeUsage: UInt32 = 0xFF0000F3
     let extendedBits: Int?
     let legacyBits: Int?
     let modeBits: Int?
+    let selectedModeBits: Int?
 
     init(descriptor: [UInt8]) throws {
         let fields = try FeatureDescriptor(descriptor)
         extendedBits = try fields.field(0xFF000047)?.bits
         legacyBits = try fields.field(0xFF000037)?.bits
         modeBits = try fields.field(0xFF0000F4)?.bits
+        selectedModeBits = try? fields.field(Self.selectedModeUsage)?.bits
     }
 
     var isValid: Bool {
@@ -60,6 +63,11 @@ struct MonitorCapabilities: Codable, Equatable, Sendable {
             throw ProbeError("The monitor does not advertise a supported mode-enable report (0xFF0000F4)", kind: .unsupported)
         }
         return modeBits / 8
+    }
+
+    var selectedModeByteCount: Int? {
+        guard let selectedModeBits, [8, 16, 32].contains(selectedModeBits) else { return nil }
+        return selectedModeBits / 8
     }
 }
 
@@ -157,6 +165,7 @@ final class MonitorReader {
             availability = .unavailable(String(describing: error), failure: failure)
             record("monitor.mode_state_failed", fields: ["operation": "enabledModes", "detail": String(describing: error)], level: .error)
         }
+        let selectedModeNumber = try readSelectedMode(capabilities: capabilities, modeCount: availability.modeCount)
         let elapsed = (ProcessInfo.processInfo.systemUptime - started) * 1_000
         record("monitor.read_finished", fields: ["elapsedMilliseconds": String(elapsed), "modeState": availability.status], level: .info)
         return MonitorReading(model: monitor.model, serialNumber: monitor.serialNumber,
@@ -164,7 +173,25 @@ final class MonitorReader {
             locationID: device.connection.location, usageHours: usage.hours, usageMinutes: usage.minutes,
             usageIdentifier: String(format: "0x%08X", format.usage), rawPayload: hex(payload),
             readAt: Date.now.ISO8601Format(), elapsedMilliseconds: elapsed,
-            modeAvailability: availability, registryID: device.connection.registryID)
+            modeAvailability: availability, selectedModeNumber: selectedModeNumber,
+            supportsSelectedMode: capabilities.selectedModeByteCount != nil, registryID: device.connection.registryID)
+    }
+
+    func readSelectedMode(capabilities: MonitorCapabilities, modeCount: Int? = nil) throws -> Int? {
+        guard let count = capabilities.selectedModeByteCount else { return nil }
+        record("monitor.read_step", fields: ["operation": "selectedMode"])
+        do {
+            let payload = try readValue(usage: MonitorCapabilities.selectedModeUsage, count: count)
+            // EIZO's selected mode index starts at zero. OSD and CN history mode numbers start at one.
+            let number = Int(littleEndian(payload[...])) + 1
+            guard number <= (modeCount ?? 32) else { throw ProbeError("Selected mode index is out of range") }
+            return number
+        } catch {
+            let failure = AcquisitionFailure.wrapping(error)
+            if [.cnInUse, .cnStateUnknown, .displayAsleep, .displayStateUnknown].contains(failure.kind) { throw failure }
+            record("monitor.mode_state_failed", fields: ["operation": "selectedMode", "detail": failure.detail], level: .notice)
+            return nil
+        }
     }
 
     private func get(_ report: MonitorReport) throws -> [UInt8] {

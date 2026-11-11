@@ -5,7 +5,7 @@ import Observation
 @Observable @MainActor
 public final class ReminderModel {
     public enum Phase: Equatable { case idle, waiting, suspended, loading, ready, blocked, failed }
-    public enum RefreshReason: String, Sendable { case startup, scheduled, manual, wake, login, retry }
+    public enum RefreshReason: String, Sendable { case startup, scheduled, manual, wake, login, retry, displayProfile }
     public enum PowerEvent: String, Sendable { case systemWillSleep, displaysDidSleep, systemDidWake, displaysDidWake }
     public private(set) var phase: Phase = .idle
     public private(set) var reports: [MonitorUsageReport] = []
@@ -21,6 +21,8 @@ public final class ReminderModel {
         var reason: RefreshReason
         var recovery: RefreshReason?
         var retryIndex = 0
+        var targets: Set<CNRegisteredMonitor> = []
+        var showsWaiting: Bool { recovery != nil }
     }
 
     private struct ReadState {
@@ -36,6 +38,7 @@ public final class ReminderModel {
     @ObservationIgnored private var delayGeneration: UUID?
     @ObservationIgnored private var scheduledAttempt: Attempt?
     @ObservationIgnored private var pendingAttempt: Attempt?
+    @ObservationIgnored private var periodicDeadline: ContinuousClock.Instant?
     @ObservationIgnored private var loginDeadline: ContinuousClock.Instant?
     @ObservationIgnored private var systemSleeping = false
     @ObservationIgnored private var displaysSleeping = false
@@ -46,11 +49,14 @@ public final class ReminderModel {
     @ObservationIgnored private let now: @Sendable () -> ContinuousClock.Instant
     @ObservationIgnored private let wait: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let reader: @Sendable (String) async throws -> MonitorRefreshResult
+    @ObservationIgnored private let selectedModeReader: @Sendable (Set<CNRegisteredMonitor>, String) async throws -> SelectedModeSnapshot
     @ObservationIgnored private let diagnostics: DiagnosticLog?
     @ObservationIgnored private var saved: [String: SavedMonitor] = [:]
     @ObservationIgnored private let accessCheck: @MainActor () -> ColorNavigatorAccessCheck
     @ObservationIgnored private let displayState: @MainActor () -> DisplayPowerState
     @ObservationIgnored private let refreshInterval: Duration
+    @ObservationIgnored public var didEnumerateUSB: (@MainActor ([String]) -> Void)?
+    @ObservationIgnored public var didApplySnapshot: (@MainActor (MonitorRefreshResult) -> Void)?
     @ObservationIgnored public var didRead: (@MainActor ([MonitorUsageReport]) -> Void)?
     @ObservationIgnored public var didFinishInitialWait: (@MainActor () -> Void)?
     var wakeRefreshPending: Bool { pendingAttempt?.reason == .wake }
@@ -66,6 +72,8 @@ public final class ReminderModel {
                 reader: (@Sendable () async throws -> [MonitorUsageReport])? = nil,
                 snapshotReader: @escaping @Sendable (String) async throws -> MonitorRefreshResult = {
                     try await HelperClient.bundled().readSnapshot(refreshID: $0)
+                }, selectedModeReader: @escaping @Sendable (Set<CNRegisteredMonitor>, String) async throws -> SelectedModeSnapshot = {
+                    try await HelperClient.bundled().readSelectedModes($0, refreshID: $1)
                 }, diagnostics: DiagnosticLog? = nil,
                 accessCheck: @escaping @MainActor () -> ColorNavigatorAccessCheck = { ColorNavigatorAccess.check() },
                 displayState: @escaping @MainActor () -> DisplayPowerState = { DisplayPowerState.current() },
@@ -75,6 +83,7 @@ public final class ReminderModel {
         self.refreshInterval = refreshInterval
         if let reader { self.reader = { _ in MonitorRefreshResult(reports: try await reader()) } }
         else { self.reader = snapshotReader }
+        self.selectedModeReader = selectedModeReader
         self.diagnostics = diagnostics
         self.accessCheck = accessCheck
         self.displayState = displayState
@@ -142,6 +151,34 @@ public final class ReminderModel {
         }
     }
 
+    public func handleDisplayProfileChange(target: CNRegisteredMonitor) {
+        // A login or wake refresh will read the current mode when its own delay ends.
+        let skipReason: String
+        if stopped { skipReason = "stopped" }
+        else if !started { skipReason = "notStarted" }
+        else if isSuspended { skipReason = "suspended" }
+        else if let recovery = scheduledAttempt?.recovery ?? pendingAttempt?.recovery {
+            skipReason = recovery.rawValue + "RefreshPending"
+        } else {
+            if let deadline = periodicDeadline {
+                let remaining = now().duration(to: deadline)
+                if remaining <= .seconds(1) {
+                    // The due full read covers the notification and cannot be postponed by it.
+                    if scheduledAttempt?.reason != .scheduled, pendingAttempt?.reason != .scheduled {
+                        schedule(Attempt(reason: .scheduled), after: max(.zero, remaining))
+                    }
+                    return
+                }
+            }
+            var targets = scheduledAttempt?.targets ?? pendingAttempt?.targets ?? []
+            targets.insert(target)
+            schedule(Attempt(reason: .displayProfile, targets: targets), after: .seconds(1))
+            return
+        }
+        diagnostics?.record(DiagnosticEvent("display_profile.skipped",
+            fields: ["reason": skipReason], level: .notice))
+    }
+
     /// Coalesce wake notifications, without shortening an outstanding login delay.
     public func refreshAfterWake() {
         guard !stopped else { return }
@@ -162,7 +199,7 @@ public final class ReminderModel {
         let current = now()
         let deadline = max(current.advanced(by: delay), loginDeadline ?? current)
         let duration = current.duration(to: deadline)
-        if attempt.reason != .scheduled { showWaiting(attempt) }
+        if attempt.showsWaiting { showWaiting(attempt) }
         diagnostics?.record(DiagnosticEvent("refresh.scheduled", fields: [
             "reason": attempt.reason.rawValue, "attempt": String(attempt.retryIndex),
             "delaySeconds": String(Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18)],
@@ -217,6 +254,11 @@ public final class ReminderModel {
             } else { suspend() }
             return
         }
+        if !attempt.targets.isEmpty {
+            performSelectedModeRead(attempt, power: power)
+            return
+        }
+        periodicDeadline = nil
         loginDeadline = nil
         let generation = UUID()
         activeRead = ReadState(id: generation, phase: phase, messages: globalMessages, detail: message)
@@ -271,20 +313,88 @@ public final class ReminderModel {
         activeRead = nil
         if result.globalFailures.contains(where: { $0.kind == .displayAsleep }) { suspend(); return }
         apply(result)
+        didApplySnapshot?(result)
         logCompletion(generation.uuidString, started: began, failures: result.globalFailures)
-        if let scheduledAttempt { showWaiting(scheduledAttempt); return }
-        if let pendingAttempt {
-            self.pendingAttempt = nil
-            perform(pendingAttempt)
+        if let scheduledAttempt, scheduledAttempt.showsWaiting {
+            showWaiting(scheduledAttempt)
             return
         }
-        if let recovery = attempt.recovery, result.needsRecoveryRetry, attempt.retryIndex < timing.retries.count {
+        if started { periodicDeadline = now().advanced(by: refreshInterval) }
+        if let recovery = attempt.recovery, result.needsRecoveryRetry, attempt.retryIndex < timing.retries.count,
+           pendingAttempt == nil || pendingAttempt?.reason == .displayProfile {
             schedule(Attempt(reason: .retry, recovery: recovery, retryIndex: attempt.retryIndex + 1),
                      after: timing.retries[attempt.retryIndex])
             return
         }
+        if let pendingAttempt {
+            self.pendingAttempt = nil
+            if pendingAttempt.reason == .displayProfile, !reports.isEmpty { didRead?(reports) }
+            perform(pendingAttempt)
+            return
+        }
         if !reports.isEmpty { didRead?(reports) }
-        if started { schedule(Attempt(reason: .scheduled), after: refreshInterval) }
+        resumePeriodicRefresh()
+    }
+
+    private func performSelectedModeRead(_ attempt: Attempt, power: DisplayPowerState) {
+        let generation = UUID()
+        let refreshID = generation.uuidString
+        activeRead = ReadState(id: generation, phase: phase, messages: globalMessages, detail: message)
+        if let denial = power.denial ?? accessCheck().denial {
+            finishSelectedModeRead(SelectedModeSnapshot(), targets: attempt.targets, generation: generation, detail: denial.detail)
+            return
+        }
+        diagnostics?.record(DiagnosticEvent("display_profile.read_started",
+            fields: ["refreshID": refreshID, "monitorCount": String(attempt.targets.count)], level: .notice))
+        refreshTask = Task.detached(priority: .utility) { [weak self, selectedModeReader] in
+            do {
+                let modes = try await selectedModeReader(attempt.targets, refreshID)
+                guard !Task.isCancelled else { return }
+                await self?.finishSelectedModeRead(modes, targets: attempt.targets, generation: generation)
+            } catch {
+                guard !Task.isCancelled else { return }
+                await self?.finishSelectedModeRead(SelectedModeSnapshot(), targets: attempt.targets, generation: generation, detail: error.localizedDescription)
+            }
+        }
+    }
+
+    private func finishSelectedModeRead(_ snapshot: SelectedModeSnapshot, targets: Set<CNRegisteredMonitor>,
+                                        generation: UUID, detail: String? = nil) {
+        guard !stopped, activeRead?.id == generation else { return }
+        activeRead = nil
+        refreshTask = nil
+        let ids = Set(targets.map(\.id))
+        let modes = snapshot.modes
+        for index in reports.indices {
+            let id = reports[index].monitor.identity.id
+            if ids.contains(id), reports[index].monitor.selectedModeNumber != modes[id] {
+                reports[index].updateSelectedMode(modes[id])
+            }
+        }
+        for index in monitors.indices {
+            let id = monitors[index].id
+            if ids.contains(id), let report = monitors[index].report, report.monitor.selectedModeNumber != modes[id] {
+                monitors[index].report?.updateSelectedMode(modes[id])
+            }
+        }
+        if let connected = snapshot.connectedRegistryIDs { didEnumerateUSB?(connected) }
+        diagnostics?.record(DiagnosticEvent("display_profile.read_finished",
+            fields: ["refreshID": generation.uuidString, "monitorCount": String(modes.count), "detail": detail ?? ""],
+            level: .notice))
+        if let pendingAttempt {
+            self.pendingAttempt = nil
+            perform(pendingAttempt)
+        } else {
+            resumePeriodicRefresh()
+        }
+    }
+
+    private func resumePeriodicRefresh() {
+        guard started, scheduledAttempt == nil else { return }
+        let current = now()
+        let deadline = periodicDeadline ?? current.advanced(by: refreshInterval)
+        periodicDeadline = deadline
+        schedule(Attempt(reason: .scheduled), after: max(.zero, current.duration(to: deadline)))
     }
 
     private func finishCancelledRead(_ generation: UUID) {
@@ -294,14 +404,17 @@ public final class ReminderModel {
         phase = previous.phase == .waiting || previous.phase == .loading ? .idle : previous.phase
         globalMessages = phase == .idle ? [] : previous.messages
         message = previous.detail
-        if let scheduledAttempt { showWaiting(scheduledAttempt); return }
+        if let scheduledAttempt {
+            if scheduledAttempt.showsWaiting { showWaiting(scheduledAttempt) }
+            return
+        }
         if let pendingAttempt {
             self.pendingAttempt = nil
             // Start the pending work in its own task, not in the cancelled
             // task's context where perform() must refuse to start new I/O.
             schedule(pendingAttempt, after: .zero)
-        } else if started {
-            schedule(Attempt(reason: .scheduled), after: refreshInterval)
+        } else {
+            resumePeriodicRefresh()
         }
     }
 

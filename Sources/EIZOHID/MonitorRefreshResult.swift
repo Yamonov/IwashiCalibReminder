@@ -84,13 +84,25 @@ public struct MonitorReadFailure: Codable, Sendable {
 
 public struct MonitorProbeResult: Sendable {
     public var readings: [MonitorReading] = []
+    public var selectedModes: [String: Int] = [:]
     public var failures: [MonitorReadFailure] = []
     public var globalFailures: [AcquisitionFailure] = []
     public var discovery = MonitorDiscoveryStatistics()
 }
 
+public struct SelectedModeSnapshot: Codable, Sendable {
+    public let modes: [String: Int]
+    public let connectedRegistryIDs: [String]?
+
+    public init(modes: [String: Int] = [:], connectedRegistryIDs: [String]? = nil) {
+        self.modes = modes
+        self.connectedRegistryIDs = connectedRegistryIDs
+    }
+}
+
 public struct MonitorDiscoveryStatistics: Codable, Sendable {
     public var enumeratedDevices = 0
+    public var connectedRegistryIDs: [String]?
     public var registeredMonitors = 0
     public var matchedDevices = 0
     public var cacheHits = 0

@@ -115,7 +115,7 @@ struct LevelDBFileSnapshot {
 
 enum LevelDBDirectReader {
     /// Returns the logical key/value view. Deleted keys stay absent even if older tables contain values.
-    static func read(directory: URL) throws -> [Data: Data] {
+    static func read(directory: URL, keyPrefix: Data? = nil) throws -> [Data: Data] {
         var files = try LevelDBFileSnapshot(directory: directory)
         let current = try files.load("CURRENT")
         guard current.count <= 4096, let text = String(data: current, encoding: .utf8), text.hasSuffix("\n") else {
@@ -130,11 +130,22 @@ enum LevelDBDirectReader {
         let manifest = try LevelDBManifest(files.load(manifestName))
         var latest = LevelDBLatestValues()
         for table in manifest.tables {
+            if let keyPrefix {
+                // Manifest bounds are validated internal keys. Compare their user-key portions.
+                let smallest = table.smallest.dropLast(8)
+                let largest = table.largest.dropLast(8)
+                if largest.lexicographicallyPrecedes(keyPrefix)
+                    || (keyPrefix.lexicographicallyPrecedes(smallest) && !smallest.starts(with: keyPrefix)) {
+                    continue
+                }
+            }
             let ldb = LevelDBFileSnapshot.filename(table.number, suffix: ".ldb")
             let sst = LevelDBFileSnapshot.filename(table.number, suffix: ".sst")
             // LevelDB's documented legacy .sst extension is used only if .ldb is absent.
             let name = files.names.contains(ldb) ? ldb : sst
-            for record in try LevelDBTable.read(files.load(name), metadata: table) { try latest.apply(record) }
+            for record in try LevelDBTable.read(files.load(name), metadata: table) where keyPrefix.map({ record.key.starts(with: $0) }) ?? true {
+                try latest.apply(record)
+            }
         }
         let logs = files.names.compactMap { name -> (UInt64, String)? in
             guard let number = LevelDBFileSnapshot.number(name, suffix: ".log"),
@@ -150,7 +161,9 @@ enum LevelDBDirectReader {
                 throw LevelDBReadError.invalid("invalid or duplicate log filename")
             }
             for batch in try LevelDBLog.records(files.load(name)) {
-                for record in try LevelDBLog.writeBatch(batch) { try latest.apply(record) }
+                for record in try LevelDBLog.writeBatch(batch) where keyPrefix.map({ record.key.starts(with: $0) }) ?? true {
+                    try latest.apply(record)
+                }
             }
         }
         // LastSequence in MANIFEST is a checkpoint, not an upper bound on subsequent WAL writes.

@@ -96,6 +96,7 @@ do {
     var databaseOnly = false
     var includeAllModes = false
     var checkCNOnly = false
+    var selectedModeTargets: Set<CNRegisteredMonitor> = []
     var index = 0
     while index < arguments.count {
         switch arguments[index] {
@@ -106,6 +107,12 @@ do {
         case "--all-modes": includeAllModes = true
         case "--check-cn": checkCNOnly = true
         case "--snapshot": snapshot = true
+        case "--selected-modes":
+            index += 1
+            guard index < arguments.count,
+                  let targets = try? JSONDecoder().decode(Set<CNRegisteredMonitor>.self, from: Data(arguments[index].utf8)),
+                  !targets.isEmpty else { throw ArgumentError(description: "--selected-modes requires monitor identities") }
+            selectedModeTargets = targets
         case "--refresh-id":
             index += 1
             guard index < arguments.count, UUID(uuidString: arguments[index]) != nil else {
@@ -167,7 +174,7 @@ do {
     if let refreshID {
         DiagnosticLog.shared.record(DiagnosticEvent("database.read_started", fields: ["refreshID": refreshID], level: .debug))
     }
-    let database = CNDatabase.read(path: databasePath, details: details)
+    let database = CNDatabase.read(path: databasePath, details: details, registrationsOnly: !selectedModeTargets.isEmpty)
     if let refreshID {
         DiagnosticLog.shared.record(DiagnosticEvent("database.read_finished", fields: [
             "refreshID": refreshID, "status": database.status, "detail": database.message ?? ""],
@@ -175,6 +182,19 @@ do {
     }
     let registered = try database.registeredMonitors()
     snapshotRegistrations = registered
+    if !selectedModeTargets.isEmpty {
+        let targets = registered.filter { selectedModeTargets.contains($0) }
+        if targets.isEmpty {
+            try printJSON(SelectedModeSnapshot())
+        } else {
+            let result = try MonitorProbe.readResult(registeredMonitors: targets, refreshID: refreshID, selectedModesOnly: true)
+            if let failure = result.globalFailures.first(where: { $0.kind != .notFound }) { throw failure }
+            try printJSON(SelectedModeSnapshot(modes: result.selectedModes,
+                connectedRegistryIDs: result.discovery.connectedRegistryIDs))
+        }
+        alarm(0)
+        exit(0)
+    }
     let probe = try MonitorProbe.readResult(registeredMonitors: registered, format: format, verbose: verbose, refreshID: refreshID)
     let reports = probe.readings.map {
         MonitorUsageReport(monitor: $0, calibrationHistory: database.history(model: $0.model, serial: $0.serialNumber),
@@ -196,6 +216,11 @@ do {
             let reading = report.monitor
             print("\(reading.model)  S/N \(reading.serialNumber)")
             print("Usage time: \(reading.usageHours) hours \(reading.usageMinutes) minutes")
+            if let number = reading.selectedModeNumber {
+                let mode = report.calibrationHistory.colorModes.first { $0.modeNumber == number }
+                let name = mode?.modeName ?? (mode?.modeType == "Standard" ? mode?.targetName : nil)
+                print("Current color mode: \(number)" + (name.map { " (\($0))" } ?? ""))
+            }
             print("USB HID \(reading.vendorID):\(reading.productID)  usage=\(reading.usageIdentifier)")
             print("Raw value: \(reading.rawPayload)")
             print("Read at: \(reading.readAt)  (\(String(format: "%.1f", reading.elapsedMilliseconds)) ms)")

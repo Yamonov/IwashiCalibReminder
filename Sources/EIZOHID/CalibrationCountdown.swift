@@ -187,7 +187,7 @@ public struct CNCalibrationCountdown: Codable, Sendable {
 
 /// Keeps the existing flat HID JSON fields and adds CN history and its derived countdown.
 public struct MonitorUsageReport: Codable, Sendable {
-    public let monitor: MonitorReading
+    public private(set) var monitor: MonitorReading
     public let calibrationHistory: CNCalibrationHistory
     public let calibrationCountdown: CNCalibrationCountdown
     public let calibrationConfiguration: CNCalibrationConfiguration?
@@ -198,6 +198,10 @@ public struct MonitorUsageReport: Codable, Sendable {
         self.calibrationHistory = calibrationHistory.selectingModes(using: monitor.modeAvailability, includeAllModes: includeAllModes)
         calibrationCountdown = .calculate(currentHours: monitor.usageHours, currentMinutes: monitor.usageMinutes,
                                           history: self.calibrationHistory, currentDate: CNDate.iso(monitor.readAt))
+    }
+
+    public mutating func updateSelectedMode(_ number: Int?) {
+        monitor.selectedModeNumber = number
     }
 
     enum CodingKeys: String, CodingKey { case calibrationHistory, calibrationCountdown, calibrationConfiguration }
