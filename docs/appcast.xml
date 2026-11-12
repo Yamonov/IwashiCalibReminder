@@ -3,6 +3,18 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>IwashiCalibReminder</title>
+        <item>
+            <title>1.1.1</title>
+            <pubDate>Fri, 13 Nov 2026 02:50:19 +0900</pubDate>
+            <link>https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.1.1</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/Yamonov/IwashiCalibReminder/releases</sparkle:fullReleaseNotesLink>
+            <sparkle:version>220</sparkle:version>
+            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description xml:lang="en"><![CDATA[<ul><li>Adjusted recovery behavior when monitor information cannot be retrieved.</li></ul>]]></description>
+            <description xml:lang="ja"><![CDATA[<ul><li>情報を取得できない状態からの復帰動作を調整</li></ul>]]></description>
+            <enclosure url="https://github.com/Yamonov/IwashiCalibReminder/releases/download/v1.1.1/IwashiCalibReminder-1.1.1.zip" length="5022883" type="application/octet-stream" sparkle:edSignature="T6pVxFGelVHQj0XxaMJZ5UGQHWIOKeR9cN0SngCBMIDsJYs4w7rVwgv801jykuNCHdq8QKByEqb/NO7FhD6pCA=="></enclosure>
+        </item>
         <item><title>1.1</title><pubDate>Wed, 11 Nov 2026 22:58:00 +0900</pubDate><link>https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.1</link><sparkle:fullReleaseNotesLink>https://github.com/Yamonov/IwashiCalibReminder/releases</sparkle:fullReleaseNotesLink><sparkle:version>217</sparkle:version><sparkle:shortVersionString>1.1</sparkle:shortVersionString><sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion><description xml:lang="en"><![CDATA[<ul><li>Shows the currently selected mode with an indicator.<ul><li>The menu cannot switch modes.</li></ul></li><li>Adjusted the user interface.</li></ul>]]></description><description xml:lang="ja"><![CDATA[<ul><li>現在の設定をインジケータで表示します。<ul><li>設定の切替はここからはできません。</li></ul></li><li>UIを調整</li></ul>]]></description><enclosure url="https://github.com/Yamonov/IwashiCalibReminder/releases/download/v1.1/IwashiCalibReminder-1.1.zip" length="4945501" type="application/octet-stream" sparkle:edSignature="xigEqxzTooS96BrtJ4GjO1n6JaXGUx2wR10X4m0ewzz0H5yc4yi/CKXegdlaQgvveV/wPtsls6xGOX9DN+4OAw=="></enclosure></item>
         <item><title>1.0.5</title><pubDate>Fri, 23 Oct 2026 16:18:26 +0900</pubDate><link>https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.0.5</link><sparkle:fullReleaseNotesLink>https://github.com/Yamonov/IwashiCalibReminder/releases</sparkle:fullReleaseNotesLink><sparkle:version>208</sparkle:version><sparkle:shortVersionString>1.0.5</sparkle:shortVersionString><sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion><description xml:lang="en"><![CDATA[<ul><li>Optimized the data read from the database.</li><li>Added launch-at-login and notification settings to Settings.</li><li>Minor UI adjustments.</li></ul>]]></description><description xml:lang="ja"><![CDATA[<ul><li>データベース読み取り内容を最適化しました。</li><li>起動項目追加や通知設定項目を環境設定に追加しました。</li><li>UIの微調整</li></ul>]]></description><enclosure url="https://github.com/Yamonov/IwashiCalibReminder/releases/download/v1.0.5/IwashiCalibReminder-1.0.5.zip" length="4949536" type="application/octet-stream" sparkle:edSignature="mplzLXFQTn3F9G5B9EcvJACKEpNg5X5bFARHdhBJkDcTqROwvC0mnA5Wta3PU22Eufk86g1jeirtE5ldmzVUCg=="></enclosure></item>
         <item><title>1.0</title><pubDate>Thu, 22 Oct 2026 23:20:40 +0900</pubDate><link>https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.0</link><sparkle:fullReleaseNotesLink>https://github.com/Yamonov/IwashiCalibReminder/releases</sparkle:fullReleaseNotesLink><sparkle:version>182</sparkle:version><sparkle:shortVersionString>1.0</sparkle:shortVersionString><sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion><description xml:lang="en"><![CDATA[<p>Official release</p>]]></description><description xml:lang="ja"><![CDATA[<p>正式リリース</p>]]></description><enclosure url="https://github.com/Yamonov/IwashiCalibReminder/releases/download/v1.0/IwashiCalibReminder-1.0.zip" length="4905735" type="application/octet-stream" sparkle:edSignature="I+vVhkmuTMP6pQtbj1C8pfHj3VIqgEKOIO0/hPGyf/XuOx7Rmq73ksSEgwzIBTqts0Qbq+Tpt+Eann2ZaYAQCg=="></enclosure></item><item>
@@ -19,6 +31,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: hqZjuBxl6L3jzJ9pNcQpxfs4ejIGyoyo/NOu/qCcY+TzoQBIMjrPZOGYG7sjy0AepOO1J99ROriX9oqXZODSDQ==
-length: 4716
+edSignature: s2/rJMkmCWzg8pcVMXjwrbtaLyb8eG6J6br97eqJDUA1NZYqcjKITNuASgr9N0N/Lg0ye0VkZYvPvVk18WSHBw==
+length: 5875
 -->
