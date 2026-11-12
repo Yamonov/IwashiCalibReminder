@@ -2943,19 +2943,19 @@
         }
       }
     },
-    "Waiting to retry monitor information… (%ld/3)": {
+    "Waiting to retry monitor information… (%ld-second interval)": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Waiting to retry monitor information… (%ld/3)"
+            "value": "Waiting to retry monitor information… (%ld-second interval)"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "再取得まで待機しています…（%ld/3）"
+            "value": "モニター情報の再取得を待っています…（間隔：%ld秒）"
           }
         }
       }

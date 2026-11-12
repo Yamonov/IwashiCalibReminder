@@ -2,13 +2,13 @@
 
 <img src="App/Assets.xcassets/AppIcon.appiconset/icon-iOS-Default-1024@1x.png" width="96" height="96" alt="IwashiCalibReminder icon">
 
-EIZO ColorEdgeの次回キャリブレーションまでの残り時間を表示する、macOSのメニューバーアプリです。バージョン **1.1**。英語・日本語に対応します。
+EIZO ColorEdgeの次回キャリブレーションまでの残り時間を表示する、macOSのメニューバーアプリです。バージョン **1.1.1**。英語・日本語に対応します。
 
 A macOS menu bar app that shows the time remaining until the next calibration of a registered EIZO ColorEdge monitor. English and Japanese are supported.
 
 ## ダウンロード
 
-[1.1のリリース](https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.1)からZIPをダウンロードし、展開した`IwashiCalibReminder.app`を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
+[1.1.1のリリース](https://github.com/Yamonov/IwashiCalibReminder/releases/tag/v1.1.1)からZIPをダウンロードし、展開した`IwashiCalibReminder.app`を使用してください。配布アプリはDeveloper ID署名・Apple公証済みです。
 
 ## 対応環境と表示
 
@@ -27,7 +27,7 @@ A macOS menu bar app that shows the time remaining until the next calibration of
 
 ## 通信と更新
 
-取得は通常起動時、処理終了から1時間ごと、手動更新、スリープ復帰後に行います。Mac・モニターのスリープ中は停止し、復帰後は15秒、ログイン起動後は30秒待ちます。復帰・ログイン時の一時的な失敗は10秒・30秒・60秒の間隔で最大3回再試行します。メニューを開くだけでは問い合わせません。ColorNavigatorの通常画面が開いている場合は取得を見送ります。Agentのみの場合は取得できますが、Agentとの完全な排他制御を保証する方式ではありません。
+取得は通常起動時、取得成功から1時間ごと、手動更新、スリープ復帰後に行います。Mac・モニターのスリープ中は停止し、復帰後は15秒、ログイン起動後は30秒待ちます。取得に失敗した場合は、更新のきっかけや失敗の種類にかかわらず、各処理の終了から10秒・30秒・以後60秒の間隔で再試行します。必要な情報が揃ったら1時間間隔に戻します。メニューを開くだけでは問い合わせません。ColorNavigatorの通常画面が開いている場合は取得を見送ります。Agentのみの場合は取得できますが、Agentとの完全な排他制御を保証する方式ではありません。
 
 CNのDBはSwiftで読み取り、モニター設定や元のDBは変更しません。情報不足を推測で補完せず、取得用CLIは必要なときだけ起動します。
 
@@ -37,13 +37,13 @@ CNのDBはSwiftで読み取り、モニター設定や元のDBは変更しませ
 
 ## ビルド
 
-Xcode 27と公式Swift 6.4.1ツールチェーンで確認しています。プロジェクトは`org.swift.641202610071a`を選択し、Swift 6言語モード・完全な並行性チェック・警告のエラー化を使用します。
+配布版はXcode 27とSwift 6.4.2で確認しています。プロジェクトは`org.swift.641202610071a`を選択し、Swift 6言語モード・完全な並行性チェック・警告のエラー化を使用します。
 
 `IwashiCalibReminder.xcodeproj`を開き、`IwashiCalibReminder`スキームでビルドしてください。アプリのビルドごとに`BuildMetadata/BuildNumber.xcconfig`の番号が増えます。
 
 公開プロジェクトはローカル実行用のアドホック署名を使用します。配布にはXcodeのArchiveをDeveloper IDで書き出し、同梱CLIとSparkleの補助プログラムも含めて署名・公証を確認してください。
 
-更新機能は公式Sparkle 2.10.0を使用します。最低OSはアプリ本体・CLIが14.0、Sparkle内部バイナリは公式の12.0です。Sparkleのライセンスをアプリにも同梱しています。LevelDBライブラリやHomebrewは不要です。
+更新機能は公式Sparkle 2.10.1を使用します。最低OSはアプリ本体・CLIが14.0、Sparkle内部バイナリは公式の12.0です。Sparkleのライセンスをアプリにも同梱しています。LevelDBライブラリやHomebrewは不要です。
 
 自分で更新配信する場合は、`Config/AppInfo.plist`の配信URLと公開鍵を変更し、秘密鍵をリポジトリに含めないでください。
 
@@ -59,5 +59,7 @@ TOOLCHAINS=org.swift.641202610071a swift build -c release --product eizo-usage
 ```
 
 CLIの出力は英語です。通常のJSONはアプリに必要な項目を返し、診断用の完全な保存記録は`--json --full-details`で取得します。`--database-only`はモニターと通信せず、保存済みのCN情報だけを読み取ります。
+
+更新の署名には本アプリ専用のキーチェーンアカウント `com.iwashiya.IwashiCalibReminder` を明示します。既存配布版の `SUPublicEDKey` と一致する鍵でZIPとappcastを署名し、両方をその公開鍵で検証してから公開します。Sparkleのデフォルトアカウントは使用しません。
 
 このリポジトリにはアプリ・CLI・共通処理・アイコン・ビルド設定を収録しています。

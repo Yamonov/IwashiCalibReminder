@@ -23,4 +23,10 @@ public struct RefreshTiming: Sendable {
         self.login = login
         self.retries = retries
     }
+
+    /// Keep using the final interval until a complete reading succeeds.
+    func retryDelay(afterFailures count: Int) -> Duration {
+        guard !retries.isEmpty else { return .seconds(60) }
+        return retries[min(max(0, count - 1), retries.count - 1)]
+    }
 }

@@ -12,6 +12,7 @@ public final class ReminderModel {
     public private(set) var monitors: [MonitorDisplayState] = []
     public private(set) var globalMessages: [String] = []
     public private(set) var message: String?
+    public private(set) var retryMessage: String?
     public private(set) var attemptedAt: Date?
     public private(set) var updatedAt: Date?
     public var isSuspended: Bool { phase == .suspended }
@@ -22,7 +23,7 @@ public final class ReminderModel {
         var recovery: RefreshReason?
         var retryIndex = 0
         var targets: Set<CNRegisteredMonitor> = []
-        var showsWaiting: Bool { recovery != nil }
+        var showsWaiting: Bool { reason == .wake || reason == .login }
     }
 
     private struct ReadState {
@@ -40,6 +41,7 @@ public final class ReminderModel {
     @ObservationIgnored private var pendingAttempt: Attempt?
     @ObservationIgnored private var periodicDeadline: ContinuousClock.Instant?
     @ObservationIgnored private var loginDeadline: ContinuousClock.Instant?
+    @ObservationIgnored private var consecutiveFailures = 0
     @ObservationIgnored private var systemSleeping = false
     @ObservationIgnored private var displaysSleeping = false
     @ObservationIgnored private var started = false
@@ -187,6 +189,7 @@ public final class ReminderModel {
             return
         }
         freezePreviousReading()
+        consecutiveFailures = 0
         let reason: RefreshReason = loginDeadline == nil ? .wake : .login
         schedule(Attempt(reason: reason, recovery: reason), after: timing.wake)
     }
@@ -199,6 +202,9 @@ public final class ReminderModel {
         let current = now()
         let deadline = max(current.advanced(by: delay), loginDeadline ?? current)
         let duration = current.duration(to: deadline)
+        if attempt.reason == .retry {
+            retryMessage = L10n.text("Waiting to retry monitor information… (%ld-second interval)", duration.components.seconds)
+        }
         if attempt.showsWaiting { showWaiting(attempt) }
         diagnostics?.record(DiagnosticEvent("refresh.scheduled", fields: [
             "reason": attempt.reason.rawValue, "attempt": String(attempt.retryIndex),
@@ -217,6 +223,7 @@ public final class ReminderModel {
         delayTask = nil
         delayGeneration = nil
         scheduledAttempt = nil
+        retryMessage = nil
         if refreshTask != nil { pendingAttempt = attempt }
         else { perform(attempt) }
     }
@@ -227,13 +234,13 @@ public final class ReminderModel {
         delayGeneration = nil
         scheduledAttempt = nil
         pendingAttempt = nil
+        retryMessage = nil
     }
 
     private func showWaiting(_ attempt: Attempt) {
         phase = .waiting
         let text: String
-        if attempt.reason == .retry { text = L10n.text("Waiting to retry monitor information… (%ld/3)", attempt.retryIndex) }
-        else if attempt.reason == .login { text = L10n.text("Waiting to read monitor information after login…") }
+        if attempt.reason == .login { text = L10n.text("Waiting to read monitor information after login…") }
         else { text = L10n.text("Waiting to read monitor information after wake…") }
         globalMessages = [text]
     }
@@ -244,13 +251,12 @@ public final class ReminderModel {
         if systemSleeping || displaysSleeping { suspend(); return }
         if power == .asleep {
             // The workspace wake event can precede WindowServer's power-state
-            // change. Recheck the OS state within the same finite recovery budget;
+            // change. Keep checking the OS state at the recovery interval;
             // no helper, DB read or HID operation is started while it is asleep.
-            if let recovery = attempt.recovery, attempt.retryIndex < timing.retries.count {
+            if attempt.recovery != nil {
                 diagnostics?.record(DiagnosticEvent("refresh.power_not_ready",
                     fields: ["reason": attempt.reason.rawValue, "attempt": String(attempt.retryIndex)], level: .notice))
-                schedule(Attempt(reason: .retry, recovery: recovery, retryIndex: attempt.retryIndex + 1),
-                    after: timing.retries[attempt.retryIndex])
+                scheduleRetry(after: attempt)
             } else { suspend() }
             return
         }
@@ -319,13 +325,18 @@ public final class ReminderModel {
             showWaiting(scheduledAttempt)
             return
         }
-        if started { periodicDeadline = now().advanced(by: refreshInterval) }
-        if let recovery = attempt.recovery, result.needsRecoveryRetry, attempt.retryIndex < timing.retries.count,
-           pendingAttempt == nil || pendingAttempt?.reason == .displayProfile {
-            schedule(Attempt(reason: .retry, recovery: recovery, retryIndex: attempt.retryIndex + 1),
-                     after: timing.retries[attempt.retryIndex])
+        if let pendingAttempt, pendingAttempt.showsWaiting {
+            self.pendingAttempt = nil
+            perform(pendingAttempt)
             return
         }
+        if result.needsRetry || monitors.contains(where: \.isStale) {
+            if !reports.isEmpty { didRead?(reports) }
+            scheduleRetry(after: attempt)
+            return
+        }
+        consecutiveFailures = 0
+        if started { periodicDeadline = now().advanced(by: refreshInterval) }
         if let pendingAttempt {
             self.pendingAttempt = nil
             if pendingAttempt.reason == .displayProfile, !reports.isEmpty { didRead?(reports) }
@@ -333,7 +344,17 @@ public final class ReminderModel {
             return
         }
         if !reports.isEmpty { didRead?(reports) }
-        resumePeriodicRefresh()
+        resumeAutomaticRefresh()
+    }
+
+    private func scheduleRetry(after attempt: Attempt) {
+        // Saturate the backoff stage so an indefinitely disconnected monitor
+        // cannot overflow a counter. Manual reads keep the current backoff.
+        consecutiveFailures = min(consecutiveFailures + 1, max(1, timing.retries.count))
+        periodicDeadline = nil
+        schedule(Attempt(reason: .retry, recovery: attempt.recovery ?? attempt.reason,
+                         retryIndex: consecutiveFailures),
+                 after: timing.retryDelay(afterFailures: consecutiveFailures))
     }
 
     private func performSelectedModeRead(_ attempt: Attempt, power: DisplayPowerState) {
@@ -381,16 +402,30 @@ public final class ReminderModel {
         diagnostics?.record(DiagnosticEvent("display_profile.read_finished",
             fields: ["refreshID": generation.uuidString, "monitorCount": String(modes.count), "detail": detail ?? ""],
             level: .notice))
+        if targets.contains(where: { modes[$0.id] == nil }),
+           scheduledAttempt?.showsWaiting != true,
+           pendingAttempt == nil || pendingAttempt?.reason == .displayProfile {
+            // Retry with a full snapshot, including the information that may
+            // have changed while the selected-mode read was unavailable.
+            scheduleRetry(after: Attempt(reason: .displayProfile))
+            return
+        }
         if let pendingAttempt {
             self.pendingAttempt = nil
             perform(pendingAttempt)
         } else {
-            resumePeriodicRefresh()
+            resumeAutomaticRefresh()
         }
     }
 
-    private func resumePeriodicRefresh() {
-        guard started, scheduledAttempt == nil else { return }
+    private func resumeAutomaticRefresh() {
+        guard !stopped, scheduledAttempt == nil else { return }
+        if consecutiveFailures > 0 {
+            schedule(Attempt(reason: .retry, recovery: .retry, retryIndex: consecutiveFailures),
+                     after: timing.retryDelay(afterFailures: consecutiveFailures))
+            return
+        }
+        guard started else { return }
         let current = now()
         let deadline = periodicDeadline ?? current.advanced(by: refreshInterval)
         periodicDeadline = deadline
@@ -414,7 +449,7 @@ public final class ReminderModel {
             // task's context where perform() must refuse to start new I/O.
             schedule(pendingAttempt, after: .zero)
         } else {
-            resumePeriodicRefresh()
+            resumeAutomaticRefresh()
         }
     }
 
@@ -431,6 +466,7 @@ public final class ReminderModel {
 
     private func suspend() {
         cancelSchedule()
+        consecutiveFailures = 0
         activeRead = nil
         refreshTask?.cancel()
         refreshTask = nil
@@ -567,6 +603,7 @@ public final class ReminderModel {
     public func stop() {
         stopped = true
         started = false
+        consecutiveFailures = 0
         cancelSchedule()
         loginDeadline = nil
         activeRead = nil

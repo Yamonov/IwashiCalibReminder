@@ -47,6 +47,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private var messages: [String] {
         var result = model.globalMessages
+        if let retry = model.retryMessage { result.append(retry) }
         if let notice = notifier.notice { result.append(notice) }
         if let failure = updater.startupFailure { result.append(failure) }
         return result
